@@ -1,0 +1,18 @@
+*.tmp
+
+# Revvy bridge runtime state (contains a per-project bearer token)
+.revvy/revvy-proxy.json
+.revvy/tools-manifest.json
+.revvy/.*.tmp
+
+# Local agent / MCP tool configs (may contain auth headers)
+.mcp.json
+
+# JS 판 (web/)
+web/node_modules/
+web/dist/
+web/tests/shots/
+
+# OS
+Thumbs.db
+.DS_Store

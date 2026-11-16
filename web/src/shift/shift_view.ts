@@ -1,0 +1,678 @@
+// 영업 화면. ShiftSession(규칙)을 돌리고 그리기·입력·연출을 맡는다.
+// 가로 화면 기준: 세로 1080 고정, 가로 1920 이상(긴 폰은 좌우가 넓어지고 내용은 가운데 정렬).
+//
+//   y   0~ 90  천막 지붕 + 상단 정보 상자(오늘 매출·할당량 / 레벨·일시정지, 무한 영업은 버틴 시간도)
+//   y  90~580  배경 + 손님 3명 (주문 말풍선은 머리 위, 말풍선 안에 인내심 게이지)
+//   y 580~700  카운터: 완성 칸 + 도마
+//   y 700~900  조리대: 가게 왼쪽 도구 / 화구 1~4 / 가게 오른쪽 도구 (80% 크기)
+//              골목 포장마차는 어묵 사각틀(2×2) / 떡볶이 판 / 순대 솥 / 튀김기 (shopLayout)
+//   y 900~1080 재료통(메뉴 수만큼, 최대 4개), 그릇 더미, 쓰레기통
+// 가게(스테이지)마다 배경·조리도구·메뉴가 다르다 (SHOPS).
+
+import { R, V, WHITE, rgb, v } from "../engine/geom.ts";
+import type { Gfx } from "../engine/gfx.ts";
+import { Scene, type PointerInfo } from "../engine/game.ts";
+import { Node2D } from "../engine/node.ts";
+import { Sound } from "../engine/audio.ts";
+import * as Ui from "../engine/ui.ts";
+import * as D from "../core/defs.ts";
+import { ShiftSession } from "../core/shift_session.ts";
+import type { ServeResult } from "../core/customer_logic.ts";
+import { GameState } from "../state/game_state.ts";
+import { StreetArt } from "../art/street_art.ts";
+import { RainFx } from "../art/rain_fx.ts";
+import * as DishArt from "../art/dish_art.ts";
+import { KitchenView, BOWL_SCALE } from "./kitchen_view.ts";
+import { StationView } from "./station_view.ts";
+import { CustomerView } from "./customer_view.ts";
+import { DragGhost } from "./drag_ghost.ts";
+import { FloatText } from "./float_text.ts";
+import { ShiftHud, type IntroEntry } from "./shift_hud.ts";
+
+const BASE_W = 1920.0;
+const DRAG_THRESHOLD = 22.0;
+const STATION_SIZE = v(296, 240); // 조리 칸 원본 크기 (STATION_SCALE 배로 줄여서 배치)
+const STATION_SCALE = 0.8;
+const STATION_Y = 800.0;
+const STATION_STEP = 270.0; // 조리 칸 1개 너비 (사이 간격 포함)
+const STATION_GAP = STATION_STEP - 296.0 * 0.8; // 조리 칸 사이 간격 (화면 기준)
+const SEAT_X = [480.0, 960.0, 1440.0]; // 손님 3명. 2026-11-12 사용자 요청으로 630 → 480 간격으로 붙임
+const CUSTOMER_SCALE = 1.1;
+const COUNTER_Y = 580.0;
+const CLOSING_DELAY = 2.0; // 영업이 끝난 뒤 "오늘 영업 끝!" 셔터가 내려오기까지 (초)
+
+const Phase = { INTRO: 0, RUNNING: 1, CLOSING: 2 } as const;
+
+interface Pending {
+  kind?: string;
+  slot?: number;
+  view?: StationView;
+  sub?: number;
+  station?: string;
+  index?: number;
+  menu?: string;
+  seat?: number;
+}
+
+/** 손님에게 날아가는 그릇 (자동 서빙 연출) */
+class ServeFly extends Node2D {
+  menu = "";
+  quality = 0;
+
+  static spawn(parent: Node2D, menu: string, quality: number, from: V, to: V): void {
+    const f = new ServeFly();
+    f.menu = menu;
+    f.quality = quality;
+    f.position = from;
+    parent.add(f);
+    const tw = f.createTween();
+    tw.prop(f, "position", to, 0.28).setTrans("quad").setEase("in");
+    tw.parallel().prop(f, "scale", v(0.75, 0.75), 0.28);
+    tw.prop(f, "modulate:a", 0.0, 0.12);
+    tw.call(() => f.queueFree());
+  }
+
+  draw(g: Gfx): void {
+    DishArt.draw(g, this.menu, v(), BOWL_SCALE, this.quality);
+  }
+}
+
+export class ShiftView extends Scene {
+  session = new ShiftSession();
+  phase: number = Phase.INTRO;
+  x0 = 0.0; // 화면이 1920보다 넓을 때 가운데 정렬 오프셋
+  counterY = COUNTER_Y;
+  headY = COUNTER_Y - 210.0;
+
+  street!: StreetArt;
+  rain: RainFx | null = null;
+  customerLayer!: Node2D;
+  kitchen!: KitchenView;
+  stationViews: StationView[] = [];
+  fxLayer!: Node2D;
+  ghost!: DragGhost;
+  hud!: ShiftHud;
+  customerViews: (CustomerView | null)[] = [null, null, null];
+
+  private pending: Pending = {};
+  private pressPos = v();
+  private dragging = false;
+
+  ready(): void {
+    this.x0 = Math.max(0.0, (this.vw - BASE_W) * 0.5);
+    const s = this.session;
+    if (GameState.mode === "endless") {
+      const sid = GameState.endlessShop;
+      s.setupEndless(sid, GameState.burnerCount(sid), GameState.heatScale(sid), GameState.patienceMult(sid));
+    } else if (GameState.mode === "event") {
+      const sid = GameState.eventShop;
+      s.setupEvent(sid, GameState.burnerCount(sid), GameState.heatScale(sid), GameState.patienceMult(sid));
+    } else {
+      const sid = D.shopForLevel(GameState.playLevel).id;
+      s.setupStory(GameState.playLevel, GameState.burnerCount(sid), GameState.heatScale(sid), GameState.patienceMult(sid));
+    }
+    s.customerArrived.connect((seat) => this.onCustomerArrived(seat));
+    s.customerLeft.connect((seat, _c, reason) => this.onCustomerLeft(seat, reason));
+    s.customerReacted.connect((seat, kind) => this.customerViews[seat]?.react(kind));
+    s.orderChanged.connect((seat) => this.onOrderChanged(seat));
+    s.itemBurnt.connect((station, index) => this.onItemBurnt(station, index));
+    s.moneyEarned.connect((seat, paid, tip, quality) => this.onMoneyEarned(seat, paid, tip, quality));
+    s.ended.connect(() => this.startClosing());
+    s.quotaReached.connect(() => {
+      this.hud.toast("할당량 달성! 손님이 오는 동안 계속 장사해요", rgb(0.55, 1.0, 0.6));
+      Sound.playSfx("perfect");
+    });
+    this.build();
+    this.hud.updateStats(s);
+    this.showIntro();
+    Sound.playBgm("shift");
+    if (s.shop.rain) Sound.playSfx("rain");
+  }
+
+  seatX(i: number): number {
+    return this.x0 + SEAT_X[i];
+  }
+
+  private build(): void {
+    const s = this.session;
+    const size = v(this.vw, this.vh);
+    const street = new StreetArt();
+    street.size = size;
+    street.counterY = this.counterY;
+    street.awningY = 0.0;
+    street.awningH = 64.0;
+    street.theme = s.shop.theme;
+    street.shopId = s.shopId;
+    if (["alley", "market", "beach"].includes(street.theme)) street.signText = s.shop.short;
+    for (const m of s.shop.menus) street.menuNames.push(D.menuName(m));
+    this.street = this.add(street);
+
+    // 바깥 거리에서 영업하는 골목 포장마차만 화면 전체에 비가 온다 (실내 가게는 창밖에만)
+    if (street.theme === "alley") {
+      const rain = new RainFx();
+      rain.area = new R(0, 140, this.vw, this.counterY - 140.0);
+      rain.count = 180;
+      this.rain = this.add(rain);
+    }
+
+    this.customerLayer = this.add(new Node2D());
+
+    const kitchen = new KitchenView();
+    kitchen.session = s;
+    kitchen.size = size;
+    kitchen.x0 = this.x0;
+    kitchen.counterY = this.counterY;
+    kitchen.trayY = this.counterY + 62.0;
+    kitchen.binsY = 992.0;
+    this.kitchen = this.add(kitchen);
+
+    // 조리대: 가게 배치(shopLayout)대로 왼쪽부터. width = 조리 칸 몇 개 너비 (떡볶이 판은 넓게)
+    const layout = D.shopLayout(s.shop);
+    const total = layout.reduce((n, e) => n + (e.width ?? 1.0), 0);
+    let x = this.x0 + BASE_W * 0.5 - total * STATION_STEP * 0.5;
+    for (const e of layout) {
+      const w = e.width ?? 1.0;
+      const local = v((w * STATION_STEP - STATION_GAP) / STATION_SCALE, STATION_SIZE.y);
+      this.addStation(e.kind, e.first, e.slots, v(x + w * STATION_STEP * 0.5, STATION_Y), e.title, local, e.grid ?? 0);
+      x += w * STATION_STEP;
+    }
+
+    this.fxLayer = this.add(new Node2D());
+
+    this.ghost = new DragGhost();
+    this.ghost.visible = false;
+    this.ghost.z = 50;
+    this.add(this.ghost);
+
+    this.hud = new ShiftHud();
+    this.add(this.hud);
+    this.hud.build(this.ui, this.vw, this.vh);
+    this.hud.startPressed.connect(() => this.onStart());
+    this.hud.backPressed.connect(() => this.game.goto("map")); // 미식가 이벤트: 기회를 쓰지 않고 돌아감
+    this.hud.pausePressed.connect(() => this.pauseGame());
+    this.hud.resumePressed.connect(() => this.resumeGame());
+    this.hud.quitPressed.connect(() => this.quitToTitle());
+  }
+
+  private addStation(station: string, first: number, count: number, pos: V, title: string, localSize: V, grid: number): void {
+    const sv = new StationView();
+    sv.setup(this.session, station, first, count, localSize, title, grid);
+    sv.position = pos;
+    sv.scale = v(STATION_SCALE, STATION_SCALE);
+    if (!this.session.stationInUse(station)) sv.lockedNote = this.stationUnlockNote(station);
+    else if (station === D.STATION_BURNER && first >= this.session.burnerCount) sv.lockedNote = "화구 추가\n업그레이드";
+    this.add(sv);
+    this.stationViews.push(sv);
+  }
+
+  /** 아직 쓰는 메뉴가 없는 조리도구: 처음 쓰는 메뉴와 그 날짜 */
+  private stationUnlockNote(station: string): string {
+    for (const m of this.session.shop.menus) {
+      if (D.menuStation(m) === station) return `${D.menuName(m)} · ${D.levelName(D.menuUnlockLevel(m))}`;
+    }
+    return "사용 안 함";
+  }
+
+  // ---------------------------------------------------------------- 진행
+
+  process(dt: number): void {
+    if (this.phase === Phase.RUNNING) this.session.update(dt);
+    this.hud.updateStats(this.session);
+  }
+
+  private showIntro(): void {
+    const s = this.session;
+    const entries: IntroEntry[] = [];
+    const shopName = s.shop.name;
+    if (s.event) {
+      const e = s.eventDef ?? D.EVENTS[0];
+      entries.push({ head: "미식가 황 선생", body: `한 번에 ${e.perRound}가지씩, 코스 ${e.rounds}번 주문해요. 코스가 지날수록 더 못 기다려요.` });
+      entries.push({ head: "평가", body: "완벽 3점 · 익음 1점 · 탐·덜 익음·늦음 0점\n만족도에 따라 별 1~5개" });
+      entries.push({ head: "보상", body: `별 5개면 ${D.formatWon(e.reward)} (별 하나에 ${D.formatWon(D.eventReward(e, 1))})\n요리 값과 팁(3배)은 따로 받아요` });
+      entries.push({ head: "딱 한 번!", body: "영업을 시작하면 다시 도전할 수 없어요.\n중간에 나가면 보상도 없어요." });
+      this.hud.showIntro(`미식가 방문 · ${shopName}`, "까다로운 미식가가 찾아왔어요!", entries, "도전 시작!", Ui.EVENT, "나중에");
+      return;
+    }
+    if (s.endless) {
+      entries.push({ head: "규칙", body: `화난 손님이 ${D.ENDLESS_LIVES}명 나오면 영업 끝. 시간이 갈수록 손님이 빨리 와요.` });
+      entries.push({ head: "최고 기록", body: D.formatWon(GameState.bestEndlessFor(s.shopId)) });
+      this.hud.showIntro(`무한 영업 · ${shopName}`, `${shopName}의 모든 메뉴, 모든 손님`, entries, "영업 시작!");
+      return;
+    }
+    const firstLevel = s.level === s.shop.first_level;
+    if (s.level === 1) {
+      entries.push({
+        head: "조작법",
+        body: "재료 탭 → 떡볶이 판에 한 판 끓이기  ·  다 익으면 판 탭 → 한 그릇씩 덜기 (초록 구간이 완벽!)\n완성 그릇 탭 → 인내심이 가장 적게 남은 손님에게 자동 서빙",
+      });
+    } else if (firstLevel) {
+      entries.push({ head: `새 가게 · ${shopName}`, body: `${s.shop.desc}\n조리도구: ${D.shopToolsText(s.shop)}` });
+    }
+    for (const m of s.newMenus) entries.push({ head: `새 메뉴 · ${D.menuName(m)} ${D.formatWon(D.menuPrice(m))}`, body: D.MENUS[m].tip, menu: m });
+    for (const t of D.customersUnlockedOn(s.level)) entries.push({ head: `새 손님 · ${D.CUSTOMERS[t].name}`, body: D.CUSTOMERS[t].desc });
+    let subtitle = `오늘 할당량 ${D.formatWon(s.target)} · 시간 제한 없음`;
+    let title = `${D.levelName(s.level)} · ${shopName}`;
+    if (firstLevel && s.level > 1) {
+      title = `${shopName} 첫 영업!`;
+      subtitle = D.levelName(s.level) + " · " + subtitle;
+    }
+    this.hud.showIntro(title, subtitle, entries, "영업 시작!");
+  }
+
+  private onStart(): void {
+    if (this.session.event) GameState.startEvent(this.session.shopId); // 여기서 기회를 쓴다
+    this.hud.hideIntro();
+    this.phase = Phase.RUNNING;
+  }
+
+  private startClosing(): void {
+    if (this.phase === Phase.CLOSING) return;
+    this.phase = Phase.CLOSING;
+    this.cancelDrag();
+    GameState.recordResult(this.session.result());
+    const caption = this.session.endless ? "영업 종료" : this.session.event ? "미식가 평가 끝!" : "오늘 영업 끝!";
+    // 마지막 손님이 떠나는 모습·번 돈을 잠깐 보여 준 뒤 셔터를 내린다 (2026-11-12 사용자 요청: 바로 말고 2초 뒤)
+    const tw = this.createTween();
+    tw.interval(CLOSING_DELAY);
+    tw.call(() => this.hud.playClosing(caption, () => this.game.goto("settlement")));
+  }
+
+  private pauseGame(): void {
+    if (this.phase !== Phase.RUNNING || this.game.paused) return;
+    this.cancelDrag();
+    this.game.paused = true;
+    this.hud.showPause();
+  }
+
+  private resumeGame(): void {
+    this.game.paused = false;
+    this.hud.hidePause();
+  }
+
+  private quitToTitle(): void {
+    this.game.paused = false;
+    this.game.goto("title");
+  }
+
+  onFocusLost(): void {
+    this.pauseGame();
+  }
+
+  onBack(): void {
+    if (this.game.paused) this.resumeGame();
+    else this.pauseGame();
+  }
+
+  // ---------------------------------------------------------------- 입력
+
+  onPointer(e: PointerInfo): void {
+    if (this.phase !== Phase.RUNNING || this.game.paused) return;
+    if (e.type === "down") this.onPress(e.pos);
+    else if (e.type === "up") this.onRelease(e.pos);
+    else if (this.pending.kind !== undefined) this.onMove(e.pos);
+  }
+
+  private onPress(p: V): void {
+    this.pressPos = p;
+    this.dragging = false;
+    this.pending = this.hit(p);
+  }
+
+  private onMove(p: V): void {
+    const k = this.kitchen;
+    if (this.dragging) {
+      this.ghost.position = p;
+      k.trashHot = k.trashRect().hasPoint(p);
+      return;
+    }
+    if (p.distanceTo(this.pressPos) < DRAG_THRESHOLD) return;
+    const kind = this.pending.kind ?? "";
+    if (kind === "bowl") {
+      const slot = this.pending.slot!;
+      const bowl = this.session.tray[slot];
+      if (bowl === null) return;
+      this.ghost.showBowl(bowl.menu, bowl.quality);
+      k.hiddenTraySlot = slot;
+    } else if (kind === "station") {
+      const item = this.session.stationItem(this.pending.station!, this.pending.index!);
+      if (item === null) return;
+      this.ghost.showItem(item);
+      this.pending.view!.hiddenSlot = this.pending.sub!;
+    } else if (kind === "board" && this.session.cutting !== null) {
+      this.ghost.showBoard(this.session.cutting);
+      k.hideBoard = true;
+    } else {
+      return;
+    }
+    this.dragging = true;
+    k.dragging = true;
+    this.ghost.position = p;
+    this.ghost.visible = true;
+  }
+
+  private onRelease(p: V): void {
+    if (this.pending.kind === undefined) return;
+    if (this.dragging) this.drop(p);
+    else this.tap();
+    this.cancelDrag();
+  }
+
+  private cancelDrag(): void {
+    if (this.pending.view) this.pending.view.hiddenSlot = -1;
+    this.pending = {};
+    this.dragging = false;
+    this.ghost.clear();
+    this.kitchen.hiddenTraySlot = -1;
+    this.kitchen.hideBoard = false;
+    this.kitchen.dragging = false;
+    this.kitchen.trashHot = false;
+  }
+
+  private hit(p: V): Pending {
+    const k = this.kitchen;
+    const slot = k.traySlotAt(p);
+    if (slot >= 0) return this.session.tray[slot] !== null ? { kind: "bowl", slot } : { kind: "empty_tray", slot };
+    if (k.boardRect().hasPoint(p)) return { kind: "board" };
+    for (const sv of this.stationViews) {
+      const sub = sv.hitSlot(p);
+      if (sub >= 0) return { kind: "station", view: sv, sub, station: sv.station, index: sv.firstIndex + sub };
+    }
+    const menu = k.binAt(p);
+    if (menu !== "") return { kind: "bin", menu };
+    const seat = this.seatAt(p);
+    if (seat >= 0) return { kind: "customer", seat };
+    return {};
+  }
+
+  /** 손님 영역: 손님 몸 + 오른쪽 말풍선까지 */
+  private seatAt(p: V): number {
+    if (p.y > this.counterY + 20.0 || p.y < 100.0) return -1;
+    for (let i = 0; i < D.SEATS; i++) {
+      const x = this.seatX(i);
+      if (p.x >= x - 230.0 && p.x <= x + 230.0 && this.session.seats[i] !== null) return i;
+    }
+    return -1;
+  }
+
+  private tap(): void {
+    const pd = this.pending;
+    switch (pd.kind ?? "") {
+      case "bowl":
+        this.serveBowl(pd.slot!);
+        break;
+      case "empty_tray": {
+        const m = this.session.trayMenu(pd.slot!);
+        this.hud.toast(`${D.menuName(m)} 그릇이에요 · 메뉴마다 ${D.TRAY_PER_MENU}그릇까지 덜어 둘 수 있어요`);
+        break;
+      }
+      case "board":
+        this.tapBoard();
+        break;
+      case "station":
+        this.tapStation();
+        break;
+      case "bin":
+        this.tapBin(pd.menu!);
+        break;
+      case "customer": {
+        const seat = pd.seat!;
+        if (this.session.tapCustomer(seat)) {
+          Sound.playSfx("tap");
+          this.customerViews[seat]?.bump();
+        }
+        break;
+      }
+    }
+  }
+
+  private tapBoard(): void {
+    const res = this.session.tapCutting();
+    switch (res.action) {
+      case "cut":
+      case "plated":
+        this.kitchen.popBoard();
+        Sound.playSfx("chop");
+        break;
+      case "blocked":
+        this.hud.toast(this.trayFullText(res.menu ?? ""), rgb(1, 0.6, 0.5));
+        break;
+      case "none":
+        this.hud.toast(this.boardHelp());
+        break;
+    }
+  }
+
+  /** 빈 도마를 탭했을 때 안내 */
+  private boardHelp(): string {
+    for (const m of this.session.menuPool) {
+      if (D.usesBoard(m)) {
+        if (D.menuStation(m) === D.STATION_BOARD) {
+          const steps = D.boardSteps(m);
+          const how = steps.length > 0 ? steps.join(" → ") : D.boardVerb(m);
+          return `${D.menuName(m)} 재료통 탭 → 여기서 ${how}`;
+        }
+        return `꺼낸 ${D.menuName(m)} → 여기서 ${D.boardVerb(m)}`;
+      }
+    }
+    return this.kitchen.boardNote() + " — 아직 쓸 일이 없어요";
+  }
+
+  private tapStation(): void {
+    const sv = this.pending.view!;
+    const sub = this.pending.sub!;
+    if (sv.isLocked()) {
+      this.hud.toast(sv.lockedNote.replace(/\n/g, " "));
+      return;
+    }
+    const res = this.session.tapStation(sv.station, this.pending.index!);
+    const pos = sv.toGlobal(sv.slotCenter(sub));
+    const action = res.action;
+    switch (action) {
+      case "take_out":
+      case "to_board":
+        this.qualityPopup(pos, res.quality ?? 0);
+        if (action === "to_board") this.kitchen.popBoard();
+        break;
+      case "blocked":
+        if (res.reason === "board") {
+          const m = this.session.cutting?.menu ?? "";
+          const what = m !== "" ? D.menuName(m) : "음식";
+          this.hud.toast(`도마에 있는 ${what}부터 ${verbEnding(m !== "" ? D.boardVerb(m) : "썰기")} 주세요`, rgb(1, 0.6, 0.5));
+        } else {
+          this.hud.toast(this.trayFullText(res.menu ?? ""), rgb(1, 0.6, 0.5));
+        }
+        Sound.playSfx("denied");
+        break;
+      case "wait": {
+        const item = this.session.stationItem(sv.station, this.pending.index!);
+        this.hud.toast(`아직이에요: ${item !== null ? item.step().label : "기다리는 중"}…`);
+        break;
+      }
+      case "none":
+        this.hud.toast("아래 재료를 탭하면 여기에 올라가요");
+        break;
+      default:
+        // 다음 단계로 (뒤집기, 면 넣기, 말기 …)
+        sv.pop(sub);
+        Sound.playSfx(action === "flip" ? "flip" : "bubble");
+    }
+  }
+
+  /** 그 메뉴 그릇 2개가 다 찼을 때 안내 */
+  private trayFullText(menu: string): string {
+    if (menu === "") return "완성 칸이 꽉 찼어요! 먼저 서빙하세요";
+    return `${D.menuName(menu)} 그릇 ${D.TRAY_PER_MENU}개가 다 찼어요! 먼저 서빙하세요`;
+  }
+
+  private tapBin(menu: string): void {
+    const s = this.session;
+    if (!s.menuPool.includes(menu)) {
+      this.hud.toast(`${D.menuName(menu)} — ${D.levelName(D.menuUnlockLevel(menu))}에 열려요`);
+      return;
+    }
+    const idx = s.addIngredient(menu);
+    const station = D.menuStation(menu);
+    if (idx < 0) {
+      const busy = D.STATIONS[station]?.busy ?? "";
+      this.hud.toast(busy !== "" ? busy : `${D.stationTitle(s.shop, station)}에 빈자리가 없어요`, rgb(1, 0.6, 0.5));
+      Sound.playSfx("denied");
+      return;
+    }
+    this.kitchen.popBin(menu);
+    if (station === D.STATION_BOARD) {
+      this.kitchen.popBoard();
+      Sound.playSfx("chop");
+      return;
+    }
+    Sound.playSfx(D.stationUsesHeat(station) && station !== "steamer" ? "sizzle" : "bubble");
+    for (const sv of this.stationViews) {
+      if (sv.station === station && idx >= sv.firstIndex && idx < sv.firstIndex + sv.slotCount) sv.pop(idx - sv.firstIndex);
+    }
+  }
+
+  private drop(p: V): void {
+    const onTrash = this.kitchen.trashRect().hasPoint(p);
+    const pd = this.pending;
+    switch (pd.kind ?? "") {
+      case "bowl": {
+        const slot = pd.slot!;
+        if (onTrash) {
+          this.wastePopup(p, this.session.discardTray(slot));
+          return;
+        }
+        // 손님에게 직접 끌어다 놓아도 된다 (탭하면 자동으로 나감)
+        const seat = this.seatAt(p);
+        if (seat < 0) return;
+        this.afterServe(this.session.serve(slot, seat));
+        break;
+      }
+      case "station":
+        if (onTrash) this.wastePopup(p, this.session.discardStation(pd.station!, pd.index!));
+        break;
+      case "board":
+        if (onTrash) this.wastePopup(p, this.session.discardCutting());
+        break;
+    }
+  }
+
+  /** 완성 그릇 탭 → 그 메뉴를 기다리는 손님 중 인내심이 가장 적게 남은 손님에게 자동으로 (그릇이 손님에게 날아감) */
+  private serveBowl(slot: number): void {
+    const bowl = this.session.tray[slot];
+    if (bowl === null) return;
+    const menu = bowl.menu;
+    const quality = bowl.quality;
+    const from = this.kitchen.trayCenter(slot).add(v(0, -14));
+    const res = this.session.autoServe(slot);
+    if (res.result === "none") {
+      this.hud.toast(`${D.menuName(menu)} 주문한 손님이 없어요`, rgb(1, 0.6, 0.5));
+      Sound.playSfx("denied");
+      return;
+    }
+    if (res.result !== "reject") ServeFly.spawn(this.fxLayer, menu, quality, from, v(this.seatX(res.seat!), this.headY + 120.0));
+    this.afterServe(res);
+  }
+
+  /** 서빙 결과 안내 (다른 메뉴는 손님이 안 받음, 덜 익은 음식은 화내며 떠남, 탄 음식은 투덜대며 받고 값은 반만) */
+  private afterServe(res: ServeResult): void {
+    if (res.result === "reject") {
+      if (res.reason === "wrong") this.hud.toast("주문한 메뉴가 아니에요", rgb(1, 0.6, 0.5));
+      Sound.playSfx("denied");
+    } else if (res.result === "angry") {
+      this.hud.toast("덜 익은 음식! 손님이 화나서 떠났어요", rgb(1, 0.45, 0.4));
+    } else if (res.reason === "burnt") {
+      this.hud.toast("탄 음식이라 값을 반만 받았어요 (팁 없음)", rgb(1, 0.6, 0.5));
+    }
+  }
+
+  private qualityPopup(pos: V, q: number): void {
+    const colors = [rgb(1, 0.55, 0.45), rgb(1, 0.92, 0.75), rgb(0.5, 1, 0.55), rgb(0.6, 0.6, 0.6)];
+    const label = q === D.Q.PERFECT ? "완벽!" : D.QUALITY_NAMES[q];
+    FloatText.spawn(this.fxLayer, pos.add(v(0, -60)), label, colors[q], q === D.Q.PERFECT ? 44 : 34);
+    Sound.playSfx(q === D.Q.PERFECT ? "perfect" : "tap");
+  }
+
+  private wastePopup(pos: V, cost: number): void {
+    if (cost <= 0) return;
+    FloatText.spawn(this.fxLayer, pos.add(v(0, -40)), `폐기 -${D.formatWon(cost)}`, rgb(1, 0.5, 0.45), 34);
+    Sound.playSfx("tap");
+  }
+
+  // ---------------------------------------------------------------- 세션 이벤트
+
+  private onCustomerArrived(seat: number): void {
+    const c = this.session.seats[seat]!;
+    const view = new CustomerView();
+    const taken = this.customerViews.filter((o): o is CustomerView => o !== null && !o.freed).map((o) => o.spriteName);
+    view.setup(c, seat, taken);
+    view.position = v(this.seatX(seat), this.headY);
+    // 미식가는 조금 크게 (보스 손님)
+    const k = c.typeId === "gourmet" ? CUSTOMER_SCALE * 1.12 : CUSTOMER_SCALE;
+    view.scale = v(k, k);
+    this.customerLayer.add(view);
+    view.playEnter();
+    this.customerViews[seat] = view;
+  }
+
+  private onCustomerLeft(seat: number, reason: string): void {
+    const view = this.customerViews[seat];
+    this.customerViews[seat] = null;
+    view?.playLeave(reason);
+    if (reason === "angry") {
+      Sound.playSfx("angry");
+      if (this.session.endless) this.hud.toast(`화난 손님! 남은 기회 ${this.session.lives}`, rgb(1, 0.45, 0.4));
+    }
+  }
+
+  private onOrderChanged(seat: number): void {
+    this.customerViews[seat]?.flashChange();
+    const g = this.session.gourmet;
+    if (g !== null && this.session.seats[seat] === g) {
+      this.hud.toast(`다음 코스! (${g.round + 1} / ${g.rounds.length})`, rgb(0.85, 0.7, 1.0));
+      Sound.playSfx("tap");
+      return;
+    }
+    this.hud.toast("진상 손님이 주문을 바꿨어요!", rgb(0.95, 0.6, 1.0));
+    Sound.playSfx("denied");
+  }
+
+  private onItemBurnt(station: string, index: number): void {
+    Sound.playSfx("burnt");
+    for (const sv of this.stationViews) {
+      if (sv.station === station && index >= sv.firstIndex && index < sv.firstIndex + sv.slotCount) {
+        FloatText.spawn(this.fxLayer, sv.toGlobal(sv.slotCenter(index - sv.firstIndex)).add(v(0, -60)), "탔어요!", rgb(1, 0.45, 0.35), 36);
+      }
+    }
+  }
+
+  private onMoneyEarned(seat: number, paid: number, tip: number, quality: number): void {
+    const view = this.customerViews[seat];
+    if (view && quality !== D.Q.RAW && quality !== D.Q.BURNT) view.bump();
+    const pos = v(this.seatX(seat), this.headY - 20.0);
+    if (paid <= 0) return;
+    FloatText.spawn(this.fxLayer, pos, `+${D.formatWon(paid)}`, Ui.GOLD, 42);
+    if (tip > 0) FloatText.spawn(this.fxLayer, pos.add(v(0, 50)), `팁 +${D.formatWon(tip)}`, rgb(0.6, 1.0, 0.6), 34, 0.25);
+    Sound.playSfx("coin");
+  }
+
+  dispose(): void {
+    this.game.paused = false;
+    void WHITE;
+  }
+}
+
+/** "썰기" → "썰어", "말기" → "말아", "버무리기" → "버무려", "무치기" → "무쳐" */
+function verbEnding(verb: string): string {
+  switch (verb) {
+    case "썰기":
+      return "썰어";
+    case "말기":
+      return "말아";
+    case "버무리기":
+      return "버무려";
+    case "무치기":
+      return "무쳐";
+    case "비비기":
+      return "비벼";
+  }
+  return "손질해";
+}

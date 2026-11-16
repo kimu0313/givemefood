@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0d0f1a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title>포장마차 타이쿤</title>
+    <link rel="icon" href="icon.svg" />
+    <link rel="preload" as="image" href="assets/art/title/main.webp" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #0d0f1a;
+        touch-action: none;
+        overscroll-behavior: none;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      #app {
+        position: fixed;
+        inset: 0;
+        overflow: hidden;
+      }
+      canvas.stage {
+        position: absolute;
+        left: 0;
+        top: 0;
+        touch-action: none;
+      }
+      /* 로딩 화면: 게임과 같은 16:9 틀 안에 시작 화면과 같은 그림 (어둡게 덮지 않음) + 아래 가운데 게임 이름과 진행 막대 (크기는 틀 높이 --h 기준) */
+      #loading {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        background: #0d0f1a;
+        transition: opacity 0.5s ease;
+        font-family: "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Noto Sans KR", "Noto Sans CJK KR", sans-serif;
+        --h: min(100vh, 56.25vw);
+      }
+      #loading.hide {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #loading .ld-frame {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: calc(var(--h) * 16 / 9);
+        height: var(--h);
+        transform: translate(-50%, -50%);
+        overflow: hidden;
+        background: #120c0a url("assets/art/title/main.webp") center top / cover no-repeat;
+      }
+      /* 게임 이름은 시작 화면(ui/title.ts)과 같은 크기·자리 (설계 1080 기준 124px, 위 끝 y≈647) — 넘어갈 때 글자가 튀지 않게 */
+      #loading .ld-box {
+        position: absolute;
+        left: 50%;
+        bottom: calc(var(--h) * 0.154);
+        transform: translateX(-50%);
+        width: calc(var(--h) * 1.1);
+        text-align: center;
+      }
+      #loading .ld-title {
+        position: relative;
+        font-family: "Bagel Fat One", "Jua", "Malgun Gothic", sans-serif;
+        font-size: calc(var(--h) * 0.1185);
+        line-height: 1.15;
+        white-space: nowrap;
+        filter: drop-shadow(0 calc(var(--h) * 0.0093) calc(var(--h) * 0.013) rgba(0, 0, 0, 0.55));
+      }
+      #loading .ld-back {
+        color: #6a1a0c;
+        -webkit-text-stroke: calc(var(--h) * 0.0244) #3a0c05;
+        paint-order: stroke fill;
+        text-shadow: 0 calc(var(--h) * 0.011) 0 #3a0c05;
+      }
+      #loading .ld-front {
+        position: absolute;
+        inset: 0;
+        color: transparent;
+        background: linear-gradient(180deg, #fffdf0 0%, #fff0a8 38%, #ffc53d 72%, #ff9a2a 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+      }
+      #loading .ld-bar {
+        margin: calc(var(--h) * 0.03) auto 0;
+        width: calc(var(--h) * 0.56);
+        height: calc(var(--h) * 0.034);
+        box-sizing: border-box;
+        border-radius: 999px;
+        padding: calc(var(--h) * 0.004);
+        background: #1a0e07;
+        border: calc(var(--h) * 0.0037) solid #3a0c05;
+        box-shadow: 0 calc(var(--h) * 0.005) 0 rgba(0, 0, 0, 0.5), inset 0 calc(var(--h) * 0.003) 0 rgba(0, 0, 0, 0.6);
+        overflow: hidden;
+      }
+      #loading .ld-fill {
+        width: 0;
+        height: 100%;
+        border-radius: 999px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.1) 45%, rgba(0, 0, 0, 0.12) 100%), #ffc531;
+      }
+      #loading .ld-text {
+        margin-top: calc(var(--h) * 0.016);
+        font-family: "Jua", "Malgun Gothic", sans-serif;
+        font-size: calc(var(--h) * 0.032);
+        color: #fff4dc;
+        -webkit-text-stroke: calc(var(--h) * 0.008) #2a1208;
+        paint-order: stroke fill;
+        letter-spacing: 0.06em;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="loading">
+      <div class="ld-frame">
+        <div class="ld-box">
+          <div class="ld-title"><div class="ld-back">포장마차 타이쿤</div><div class="ld-front">포장마차 타이쿤</div></div>
+          <div class="ld-bar"><div class="ld-fill"></div></div>
+          <div class="ld-text">가게 문 여는 중…</div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
