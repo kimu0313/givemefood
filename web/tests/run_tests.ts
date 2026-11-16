@@ -347,7 +347,7 @@ function testSessionCuttingAndWaste(): void {
   ok(blocked.action === "blocked" && blocked.menu === "odeng", "어묵 그릇 2개가 차면 어묵을 더 못 꺼냄");
   ok(s.freeTraySlot("tteokbokki") === 0 && s.freeTraySlot("twigim") === 6, "다른 메뉴 그릇은 그대로 비어 있음");
 
-  // 떡볶이 판 4그릇 → 그릇 2개만 덜 수 있음
+  // 떡볶이 판 3그릇 → 그릇 2개만 덜 수 있음
   const tp = new ShiftSession();
   tp.setupStory(1, 2, 1.0, 1.0, 3);
   tp.addIngredient("tteokbokki");
@@ -832,13 +832,30 @@ function testRegularsAndStock(): void {
     const s = new ShiftSession();
     s.setupStory(D.shopDef(sid).first_level, 2, 1.0, 1.0, 3);
     const seen = new Set<string>();
-    for (let i = 0; i < n; i++) seen.add(s.pickRegular().id);
+    for (let i = 0; i < n; i++) seen.add(s.pickRegular()!.id);
     return seen;
   };
   ok(same([...pick("pocha", 50)], ["taxi"]), "첫 가게 단골은 택시 기사 한 명");
   const b = pick("bunsik", 300);
   ok(b.size === 3 && b.has("cafe") && b.has("student") && b.has("taxi"), `두 번째 가게: 택시 기사 + 대학생 + 수아 (${[...b]})`);
   ok(pick("beach", 600).size === 6, "네 번째 가게엔 여섯 명 모두");
+  // 단골은 하루에 한 번만 (같은 단골이 또 오거나 동시에 둘이 앉지 않음)
+  {
+    const s2 = new ShiftSession();
+    s2.setupStory(20, 2, 1.0, 1.0, 8);
+    s2.customerTypes = ["regular"];
+    const spawn = (s2 as unknown as { spawnCustomer(seat: number): void }).spawnCustomer.bind(s2);
+    const got: string[] = [];
+    let normals = 0;
+    for (let i = 0; i < 12; i++) {
+      spawn(i % D.SEATS);
+      const c = s2.seats[i % D.SEATS]!;
+      if (c.typeId === "regular") got.push(c.regularId);
+      else normals++;
+      s2.seats[i % D.SEATS] = null;
+    }
+    ok(got.length === 6 && new Set(got).size === 6 && normals === 6, `단골 6명이 하루에 한 번씩만, 그다음은 보통 손님 (${got.join(",")})`);
+  }
 
   // 재료: 1인분 값 = 메뉴 값의 25% (50원 단위)
   ok(D.ingredientCost("tteokbokki") === 750 && D.ingredientCost("odeng") === 400, "1인분 재료값");

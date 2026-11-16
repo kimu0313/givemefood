@@ -20,6 +20,22 @@ function run(item: CookItem, seconds: number): void {
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 export function viewTests(ok: (cond: boolean, msg: string) => void): void {
+  // 하루 동안 같은 얼굴이 두 번 안 나옴 (2026-11-16 사용자 "같은 손님이 하루에 여러 번·동시에")
+  {
+    const today = new Set<string>();
+    const ids: string[] = [];
+    for (let i = 0; i < 15; i++) {
+      for (const t of ["normal", "hurry", "jinsang", "drunk"]) {
+        const cv = new CustomerView();
+        cv.setup(new CustomerLogic(t, ["tteokbokki"]), i % 3, [], today);
+        ids.push(cv.identity);
+      }
+    }
+    ok(new Set(ids).size === ids.length, `손님 60명 (종류마다 15명)이 와도 하루 동안 얼굴이 안 겹침 (${new Set(ids).size}/${ids.length})`);
+    const sprites = ids.filter((x) => !x.includes(":"));
+    ok(sprites.length <= ArtAssets.customerSpritePool("normal").length + 2, "캐릭터 그림은 하루에 한 번씩만 (다 쓰면 도형 생김새로)");
+  }
+
   // 조리 칸 안내 문구
   const over = new CookItem("tteokbokki");
   run(over, 17.0);

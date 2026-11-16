@@ -482,3 +482,233 @@ export function house(g: Gfx, r: GRect, st: HouseStyle, seed: number): void {
     if (r.x1 - r.x0 > 2.2) box(g, tank, H, H + 34, shades(rgb(0.36, 0.52, 0.7)), INK, 2);
   }
 }
+
+// ---------------------------------------------------------------- 가게마다 동네 소품 (2026-11-16 사용자 "스테이지 배경도 현재 가게에 맞게 꾸며줘")
+
+/** 골목 포장마차: 플라스틱 테이블 + 초록 소주병 + 의자 두 개 */
+export function tableSet(g: Gfx, gx: number, gy: number, color: Color): void {
+  flatEllipse(g, iso(gx, gy).add(v(4, 3)), 58.0, rgb(0, 0, 0, 0.24));
+  stool(g, gx - 0.42, gy - 0.1, rgb(0.86, 0.22, 0.18));
+  const r = { x0: gx - 0.3, y0: gy - 0.3, x1: gx + 0.3, y1: gy + 0.3 };
+  // 다리 + 상판
+  for (const [x, y] of [
+    [r.x0 + 0.05, r.y1 - 0.05],
+    [r.x1 - 0.05, r.y1 - 0.05],
+    [r.x1 - 0.05, r.y0 + 0.05],
+  ]) {
+    const a = iso(x, y);
+    g.line(a, a.add(v(0, -30)), color.darkened(0.35), 4);
+  }
+  box(g, r, 30, 36, shades(color), INK, 2);
+  // 소주병 두 개 + 잔
+  const top = iso(gx, gy, 36);
+  for (const dx of [-10, 6]) {
+    const b = top.add(v(dx, 2));
+    g.rect(new R(b.x - 4, b.y - 22, 8, 22), rgb(0.25, 0.62, 0.36));
+    g.rect(new R(b.x - 2, b.y - 30, 4, 8), rgb(0.25, 0.62, 0.36));
+    g.rect(new R(b.x - 3, b.y - 15, 6, 6), rgb(0.95, 0.95, 0.9));
+  }
+  g.rect(new R(top.x + 14, top.y - 8, 6, 8), rgb(0.85, 0.92, 0.95, 0.9));
+  stool(g, gx + 0.42, gy + 0.1, rgb(0.2, 0.45, 0.8));
+}
+
+/** 빨간 종이 등 (공중에 매달림, 밤엔 빛남) */
+function lantern(g: Gfx, c: V, s: number, lit: number): void {
+  if (lit > 0) glow(g, c, 34 * s, rgb(1.0, 0.45, 0.3, 0.35 * lit));
+  FoodArt.ellipse(g, c, 11 * s, 14 * s, rgb(0.9, 0.18, 0.14));
+  FoodArt.ellipse(g, c.add(v(-3 * s, -3 * s)), 4 * s, 6 * s, rgb(1.0, 0.55, 0.4, 0.8));
+  g.rect(new R(c.x - 6 * s, c.y - 16 * s, 12 * s, 4 * s), rgb(0.2, 0.12, 0.08));
+  g.rect(new R(c.x - 6 * s, c.y + 12 * s, 12 * s, 4 * s), rgb(0.2, 0.12, 0.08));
+  g.line(c.add(v(0, 16 * s)), c.add(v(0, 24 * s)), rgb(0.95, 0.75, 0.2), 2);
+}
+
+/** 기둥 두 개 사이에 늘어진 줄 + 빨간 등 (골목 포장마차) */
+export function lanternLine(g: Gfx, a: [number, number], b: [number, number], lit: number, t: number): void {
+  const h = 110;
+  const pa = iso(a[0], a[1]);
+  const pb = iso(b[0], b[1]);
+  for (const p of [pa, pb]) {
+    flatEllipse(g, p.add(v(2, 2)), 12.0, rgb(0, 0, 0, 0.25));
+    g.line(p, p.add(v(0, -h)), rgb(0.35, 0.24, 0.16), 6);
+    g.line(p.add(v(-1, 0)), p.add(v(-1, -h)), rgb(0.5, 0.36, 0.24), 2);
+  }
+  const ta = pa.add(v(0, -h + 6));
+  const tb = pb.add(v(0, -h + 6));
+  const sag = 26;
+  const pts: V[] = [];
+  for (let k = 0; k <= 16; k++) {
+    const u = k / 16;
+    pts.push(ta.lerp(tb, u).add(v(0, Math.sin(u * PI) * sag)));
+  }
+  g.polyline(pts, rgb(0.15, 0.1, 0.08), 2.5);
+  for (let k = 1; k <= 4; k++) {
+    const u = k / 5;
+    const c = ta.lerp(tb, u).add(v(Math.sin(t * 1.6 + k) * 2, Math.sin(u * PI) * sag + 20));
+    lantern(g, c, 1.0, lit);
+  }
+}
+
+/** 동네 분식집: 어린이 보호구역 표지판 */
+export function schoolSign(g: Gfx, gx: number, gy: number): void {
+  const p = iso(gx, gy);
+  flatEllipse(g, p.add(v(3, 2)), 14.0, rgb(0, 0, 0, 0.25));
+  g.line(p, p.add(v(0, -96)), rgb(0.62, 0.64, 0.68), 5);
+  const c = p.add(v(0, -104));
+  // 노란 테두리 + 빨간 띠 + 흰 글자 판
+  FoodArt.roundedRect(g, new R(c.x - 46, c.y - 30, 92, 54), rgb(1.0, 0.82, 0.12), 8, INK, 2.5);
+  FoodArt.roundedRect(g, new R(c.x - 40, c.y - 24, 80, 18), rgb(0.86, 0.2, 0.16), 4);
+  FoodArt.text(g, "어린이", c.add(v(0, -15)), 15, rgb(1, 1, 1), 76);
+  FoodArt.text(g, "보호구역", c.add(v(0, 9)), 17, INK, 84);
+}
+
+/** 자전거 (옆모습을 땅 위에 비스듬히) */
+export function bicycle(g: Gfx, gx: number, gy: number, color: Color): void {
+  const p = iso(gx, gy);
+  flatEllipse(g, p.add(v(2, 3)), 34.0, rgb(0, 0, 0, 0.2));
+  const w0 = p.add(v(-22, -16));
+  const w1 = p.add(v(22, -6));
+  for (const w of [w0, w1]) {
+    g.circle(w, 14, rgb(0.15, 0.12, 0.1));
+    g.circle(w, 10, rgb(0.85, 0.85, 0.82));
+    g.circle(w, 3, INK);
+  }
+  const seat = p.add(v(-8, -40));
+  const bar = p.add(v(14, -42));
+  const ped = p.add(v(0, -12));
+  g.polyline([w0, ped, seat.add(v(2, 6)), w0], color, 4);
+  g.polyline([ped, bar.add(v(0, 6)), w1], color, 4);
+  g.line(seat.add(v(2, 6)), bar.add(v(0, 6)), color, 4);
+  g.line(seat.add(v(-6, 0)), seat.add(v(6, 0)), INK, 5);
+  g.line(bar.add(v(-6, -2)), bar.add(v(8, 2)), INK, 4);
+  // 앞 바구니
+  g.rect(new R(bar.x + 4, bar.y + 2, 14, 10), rgb(0.85, 0.7, 0.45));
+}
+
+/** 야시장: 줄무늬 천막 노점 (상판 위 물건 + 전구 하나) */
+export function stall(g: Gfx, gx: number, gy: number, a: Color, b: Color, goods: Color[], lit: number): void {
+  const r = { x0: gx - 0.55, y0: gy - 0.4, x1: gx + 0.55, y1: gy + 0.4 };
+  flatEllipse(g, iso(gx, gy).add(v(6, 4)), 72.0, rgb(0, 0, 0, 0.25));
+  if (lit > 0) flatGlow(g, iso(gx, gy + 0.5), 110.0, rgb(1.0, 0.78, 0.4, 0.3 * lit));
+  // 뒤 기둥
+  for (const [x, y] of [
+    [r.x0, r.y0],
+    [r.x1, r.y0],
+  ]) {
+    const q = iso(x, y);
+    g.line(q, q.add(v(0, -74)), rgb(0.3, 0.22, 0.16), 4);
+  }
+  box(g, r, 0, 28, shades(rgb(0.6, 0.42, 0.28)), INK, 2);
+  onLeftFace(g, r, 28, (w) => g.rect(rectAt(4, 4, w - 8, 8), a.darkened(0.1)));
+  // 상판 위 물건 (동그란 것들)
+  for (let k = 0; k < 6; k++) {
+    const x = r.x0 + 0.15 + (k % 3) * 0.38;
+    const y = r.y0 + 0.2 + Math.floor(k / 3) * 0.38;
+    const c = iso(x, y, 28);
+    g.circle(c.add(v(0, -6)), 9, goods[k % goods.length]);
+    g.circle(c.add(v(-3, -9)), 3, rgb(1, 1, 1, 0.6));
+  }
+  // 앞 기둥
+  for (const [x, y] of [
+    [r.x0, r.y1],
+    [r.x1, r.y1],
+  ]) {
+    const q = iso(x, y);
+    g.line(q, q.add(v(0, -74)), rgb(0.3, 0.22, 0.16), 4);
+  }
+  tentRoof(g, r, 74, 22, a, b, 6, 0.15);
+  if (lit > 0) {
+    const bulb = iso(gx, gy, 66);
+    glow(g, bulb, 26, rgb(1.0, 0.85, 0.5, 0.6 * lit));
+    g.circle(bulb, 5, rgb(1.0, 0.95, 0.75));
+  }
+}
+
+/** 해변: 모래에 꽂힌 서핑보드 */
+export function surfboard(g: Gfx, gx: number, gy: number, color: Color, lean: number): void {
+  const p = iso(gx, gy);
+  flatEllipse(g, p.add(v(10, 3)), 26.0, rgb(0, 0, 0, 0.2));
+  const ctx = g.ctx;
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(lean);
+  FoodArt.roundedRect(g, new R(-11, -92, 22, 96), color, 11, INK, 2.5);
+  g.line(v(0, -88), v(0, 0), rgb(1, 1, 1, 0.75), 3);
+  g.rect(new R(-11, -52, 22, 6), color.darkened(0.25));
+  ctx.restore();
+}
+
+/** 해변: 모래성 (깃발) */
+export function sandcastle(g: Gfx, gx: number, gy: number): void {
+  const sand = rgb(0.9, 0.76, 0.5);
+  const r = { x0: gx - 0.32, y0: gy - 0.32, x1: gx + 0.32, y1: gy + 0.32 };
+  flatEllipse(g, iso(gx, gy).add(v(4, 3)), 44.0, rgb(0, 0, 0, 0.18));
+  box(g, r, 0, 18, shades(sand), INK, 2);
+  const t = { x0: gx - 0.14, y0: gy - 0.14, x1: gx + 0.14, y1: gy + 0.14 };
+  box(g, t, 18, 40, shades(sand.lightened(0.05)), INK, 2);
+  const top = iso(gx, gy, 40);
+  g.line(top, top.add(v(0, -22)), INK, 2);
+  g.polygon([top.add(v(0, -22)), top.add(v(14, -17)), top.add(v(0, -12))], rgb(0.95, 0.3, 0.25));
+}
+
+/** 실내 포차 거리: 세워 둔 주황 택시 (gx 방향으로 길쭉) */
+export function taxi(g: Gfx, gx: number, gy: number): void {
+  const body = rgb(0.95, 0.55, 0.15);
+  const r = { x0: gx - 0.75, y0: gy - 0.38, x1: gx + 0.75, y1: gy + 0.38 };
+  flatEllipse(g, iso(gx, gy).add(v(6, 6)), 92.0, rgb(0, 0, 0, 0.3));
+  // 바퀴
+  for (const x of [r.x0 + 0.3, r.x1 - 0.3]) {
+    const w = iso(x, r.y1, 8);
+    FoodArt.ellipse(g, w, 9, 11, rgb(0.12, 0.1, 0.1));
+  }
+  box(g, r, 6, 26, shades(body), INK, 2.5);
+  const c = { x0: gx - 0.42, y0: gy - 0.3, x1: gx + 0.28, y1: gy + 0.3 };
+  box(g, c, 26, 44, { top: body.lightened(0.15), left: rgb(0.55, 0.75, 0.9), right: rgb(0.45, 0.62, 0.78) }, INK, 2.5);
+  // 지붕 택시 등 + 앞 전조등
+  const lampC = iso(gx - 0.07, gy, 44);
+  FoodArt.roundedRect(g, new R(lampC.x - 16, lampC.y - 13, 32, 12), rgb(0.98, 0.95, 0.85), 4, INK, 2);
+  FoodArt.text(g, "TAXI", lampC.add(v(0, -7)), 10, INK, 30);
+  const head = iso(r.x1, gy, 16);
+  glow(g, head.add(v(4, 0)), 22, rgb(1.0, 0.95, 0.7, 0.5));
+}
+
+/** 실내 포차 거리: 기둥 위 네온 간판 (깜빡임) */
+export function neonSign(g: Gfx, gx: number, gy: number, text: string, color: Color, t: number, seed: number): void {
+  const p = iso(gx, gy);
+  flatEllipse(g, p.add(v(2, 2)), 12.0, rgb(0, 0, 0, 0.25));
+  g.line(p, p.add(v(0, -88)), rgb(0.22, 0.22, 0.26), 5);
+  const flick = Math.sin(t * 9.0 + seed) > -0.92 ? 1.0 : 0.35;
+  const c = p.add(v(0, -112));
+  const w = 26 + text.length * 26;
+  glow(g, c, w * 0.75, color.withA(0.35 * flick));
+  FoodArt.roundedRect(g, new R(c.x - w * 0.5, c.y - 22, w, 44), rgb(0.08, 0.06, 0.1), 10, color.withA(0.4 + 0.6 * flick), 4);
+  FoodArt.textOutlined(g, text, c.add(v(0, 1)), 26, rgb(1, 1, 1).lerp(color, 0.35).withA(0.5 + 0.5 * flick), color.withA(0.8 * flick), 6, w);
+}
+
+/** 바다 위 작은 배 (위아래로 둥실) */
+export function boat(g: Gfx, c: V, s: number, t: number, hull: Color): void {
+  const bob = Math.sin(t * 1.6 + c.x * 0.01) * 4;
+  const b = c.add(v(0, bob));
+  const ctx = g.ctx;
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.scale(s, s);
+  ctx.rotate(Math.sin(t * 1.3 + c.x) * 0.04);
+  g.polygon([v(-46, -8), v(46, -8), v(34, 10), v(-36, 10)], hull);
+  g.polygon([v(-46, -8), v(46, -8), v(44, -2), v(-44, -2)], rgb(0.98, 0.97, 0.94));
+  g.polyline([v(-46, -8), v(46, -8), v(34, 10), v(-36, 10), v(-46, -8)], INK, 2.5);
+  FoodArt.roundedRect(g, new R(-20, -30, 28, 22), rgb(0.97, 0.97, 0.95), 4, INK, 2);
+  g.rect(new R(-15, -25, 8, 7), rgb(0.55, 0.78, 0.92));
+  g.line(v(18, -8), v(18, -52), INK, 2.5);
+  g.polygon([v(18, -52), v(36, -46), v(18, -40)], rgb(0.95, 0.3, 0.25));
+  ctx.restore();
+  // 물결
+  g.arc(b.add(v(-30, 14)), 12, 0.2, PI - 0.2, rgb(1, 1, 1, 0.55), 2);
+  g.arc(b.add(v(26, 14)), 10, 0.2, PI - 0.2, rgb(1, 1, 1, 0.45), 2);
+}
+
+/** 하늘을 나는 갈매기 (날갯짓) */
+export function seagull(g: Gfx, c: V, s: number, t: number): void {
+  const flap = Math.sin(t * 7.0 + c.x * 0.05) * 6 * s;
+  g.polyline([c.add(v(-16 * s, -2 * s + flap)), c.add(v(-6 * s, -6 * s)), c, c.add(v(6 * s, -6 * s)), c.add(v(16 * s, -2 * s + flap))], rgb(0.98, 0.98, 0.98), 4 * s);
+  g.polyline([c.add(v(-16 * s, -2 * s + flap)), c.add(v(-6 * s, -6 * s)), c, c.add(v(6 * s, -6 * s)), c.add(v(16 * s, -2 * s + flap))], INK.withA(0.6), 1.5);
+}

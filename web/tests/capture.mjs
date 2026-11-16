@@ -272,6 +272,33 @@ const shots = {
     await page.waitForTimeout(300);
     await shot("buy_in_shift");
   },
+  /** 가게마다 동네 차림 손님: 동네 분식집 = 가방 멘 학생 (창밖 학교), 해변 = 하와이안 셔츠·비키니 */
+  async outfits() {
+    for (const [lv, name, outfits] of [[10, "outfit_bunsik", ["student", "student", "student"]], [24, "outfit_beach", ["hawaiian", "bikini", "hawaiian"]]]) {
+      await open("title", `Object.assign(window.__state, {level: ${lv}, playLevel: ${lv}, mode: 'story'}); window.__game.goto('shift')`);
+      await page.evaluate((outfits) => {
+        const sc = window.__game.scene;
+        sc.onStart();
+        sc.openShop();
+        const s = sc.session;
+        for (let i = 0; i < 600 && s.seatedCount() < 1; i++) window.__game.frame(1 / 60);
+        const C = s.seats.find((c) => c !== null).constructor;
+        for (let seat = 0; seat < 3; seat++) {
+          if (s.seats[seat] === null) s.debugSeatCustomer(seat, new C("normal", [s.menuPool[seat % s.menuPool.length]]));
+        }
+        for (let i = 0; i < 40; i++) window.__game.frame(1 / 60);
+        sc.customerViews.forEach((cv, i) => {
+          if (!cv) return;
+          cv.spriteName = "";
+          cv.outfit = outfits[i];
+          cv.look = 2 + i * 37;
+        });
+        for (let i = 0; i < 10; i++) window.__game.frame(1 / 60);
+      }, outfits);
+      await page.waitForTimeout(150);
+      await shot(name);
+    }
+  },
   async quit() {
     await open("title");
     await page.getByText("게임 종료").click();
@@ -403,7 +430,7 @@ shots.flow = async () => {
     return { bin: sc.kitchen.binCenter(0), pan: { x: pan.position.x, y: pan.position.y }, tray: sc.kitchen.trayCenter(0) };
   });
   await clickDesign(L.bin.x, L.bin.y);
-  check(await page.evaluate(() => window.__game.scene.session.stationItem("pan", 0) !== null && window.__game.scene.session.stockLeft("tteokbokki") === 5), "떡볶이 재료 탭 → 판에 올라감 (판 5그릇 = 재료 5인분)");
+  check(await page.evaluate(() => window.__game.scene.session.stationItem("pan", 0) !== null && window.__game.scene.session.stockLeft("tteokbokki") === 6), "떡볶이 재료 탭 → 판에 올라감 (키운 판 4그릇 = 재료 4인분)");
   await step(30);
   await shot("tut_10_pan");
   await step(8.2 * 60);

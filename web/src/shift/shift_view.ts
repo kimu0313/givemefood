@@ -666,7 +666,7 @@ export class ShiftView extends Scene {
       return;
     }
     if (s.armPowder()) {
-      this.hud.toast("✨ 가루 준비! 다음에 올리는 재료에 뿌려요 (빨리 익고 끝까지 완벽, 손님이 값을 2배로!)", rgb(0.9, 0.75, 1.0));
+      this.hud.toast("✨ 가루 준비…! 다음에 올리는 재료에 뿌려져요. 무슨 일이 일어날까요?", rgb(0.9, 0.75, 1.0));
       Sound.playSfx("magic");
     } else {
       this.hud.toast("가루 뿌리기를 취소했어요");
@@ -763,9 +763,9 @@ export class ShiftView extends Scene {
   /** 서빙 결과 안내 (다른 메뉴는 손님이 안 받음, 덜 익은 음식은 화내며 떠남, 탄 음식은 투덜대며 받고 값은 반만) */
   private afterServe(res: ServeResult): void {
     if (res.magic === true) {
-      // 마법의 가루 요리: 값 2배 + 반짝이는 글자
+      // 마법의 가루 요리: 반짝이는 글자 (효과는 말하지 않음 — 받은 돈을 보고 알아채게)
       const x = res.seat !== undefined ? this.seatX(res.seat) : this.vw * 0.5;
-      FloatText.spawn(this.fxLayer, v(x, this.headY - 120.0), "✨ 마법의 맛! 값 2배", rgb(0.95, 0.75, 1.0), 40, 0.15);
+      FloatText.spawn(this.fxLayer, v(x, this.headY - 120.0), "✨ 마법의 맛!", rgb(0.95, 0.75, 1.0), 40, 0.15);
       Sound.playSfx("magic");
     }
     if (res.result === "reject") {
@@ -797,15 +797,20 @@ export class ShiftView extends Scene {
 
   // ---------------------------------------------------------------- 세션 이벤트
 
+  private facesToday = new Set<string>(); // 이번 영업에 온 손님 얼굴 (같은 사람이 또 오지 않게 — 그것 말고는 랜덤)
+
   private onCustomerArrived(seat: number): void {
     const c = this.session.seats[seat]!;
     const view = new CustomerView();
     const taken = this.customerViews.filter((o): o is CustomerView => o !== null && !o.freed).map((o) => o.spriteName);
-    view.setup(c, seat, taken);
+    view.shopTheme = this.session.shop.theme;
+    view.setup(c, seat, taken, this.facesToday);
     view.position = v(this.seatX(seat), this.headY);
     // 미식가는 조금 크게 (보스 손님)
-    const k = c.typeId === "gourmet" ? CUSTOMER_SCALE * 1.12 : CUSTOMER_SCALE;
+    // 어린 학생은 조금 작게 (자리에 맞춰 살짝 아래로)
+    const k = c.typeId === "gourmet" ? CUSTOMER_SCALE * 1.12 : view.outfit === "student" ? CUSTOMER_SCALE * 0.88 : CUSTOMER_SCALE;
     view.scale = v(k, k);
+    if (view.outfit === "student") view.position = view.position.add(v(0, 26));
     this.customerLayer.add(view);
     view.playEnter();
     this.customerViews[seat] = view;

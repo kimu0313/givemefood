@@ -123,6 +123,7 @@ export class ShiftSession {
   lives = D.ENDLESS_LIVES;
   target = 0;
   regularsServed: string[] = [];
+  regularsToday: string[] = []; // 이번 영업에 온 단골 (한 번씩만)
   stock: Record<string, number> | null = null; // 메뉴 → 남은 재료 (인분). null = 무한 (테스트·봇·미식가 이벤트)
   wasted = 0; // 버린 음식 (그릇 수)
   frozen = false; // 튜토리얼 설명 중: 손님 인내심이 줄지 않음
@@ -231,6 +232,7 @@ export class ShiftSession {
     this.angryCount = 0;
     this.lives = D.ENDLESS_LIVES;
     this.regularsServed = [];
+    this.regularsToday = [];
     this.gourmet = null;
     this.stock = null;
     this.wasted = 0;
@@ -721,14 +723,18 @@ export class ShiftSession {
   }
 
   private spawnCustomer(seat: number): void {
-    const typeId = this.pickType();
+    let typeId = this.pickType();
+    // 올 단골이 없으면 (오늘 다 왔으면) 보통 손님으로
+    const reg = typeId === "regular" ? this.pickRegular() : null;
+    if (typeId === "regular" && reg === null) typeId = "normal";
     let count = 1;
     if (D.CUSTOMERS[typeId].max_items >= 2 && this.rng.randf() < D.SECOND_ITEM_CHANCE) count = 2;
     const menus: string[] = [];
     for (let k = 0; k < count; k++) menus.push(this.pickMenu());
     const c = new CustomerLogic(typeId, menus, this.patienceMult);
-    if (typeId === "regular") {
-      const r = this.pickRegular();
+    if (typeId === "regular" && reg !== null) {
+      const r = reg;
+      this.regularsToday.push(r.id);
       c.regularId = r.id;
       c.line = r.lines[this.rng.randiRange(0, r.lines.length - 1)];
     } else if (typeId === "jinsang") {
@@ -752,17 +758,14 @@ export class ShiftSession {
     return this.customerTypes[this.customerTypes.length - 1];
   }
 
-  /** 이 가게에 오는 단골 중 하나 (이 가게에서 새로 만나는 단골은 REGULAR_NEW_WEIGHT 배 자주) */
-  pickRegular(): D.RegularDef {
-    const pool = D.regularsFor(this.shopId);
-    if (pool.length === 0) return D.REGULARS[0];
-    const w = (r: D.RegularDef) => (r.shop === this.shopId ? D.REGULAR_NEW_WEIGHT : 1.0);
-    let roll = this.rng.randf() * pool.reduce((n, r) => n + w(r), 0);
-    for (const r of pool) {
-      roll -= w(r);
-      if (roll <= 0.0) return r;
-    }
-    return pool[pool.length - 1];
+  /**
+   * 이 가게에 오는 단골 중 아무나 하나 (똑같은 확률). 오늘(이번 영업) 이미 온 단골은 다시 안 옴 — 올 사람이 없으면 null.
+   * (2026-11-16 사용자: "같은 스테이지에만 사람 안 겹치면 돼, 그것만 지키고 사람 오는 건 랜덤으로")
+   */
+  pickRegular(): D.RegularDef | null {
+    const pool = D.regularsFor(this.shopId).filter((r) => !this.regularsToday.includes(r.id));
+    if (pool.length === 0) return null;
+    return pool[this.rng.randiRange(0, pool.length - 1)];
   }
 
   private pickMenu(): string {

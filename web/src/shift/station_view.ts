@@ -33,7 +33,7 @@ export function hintFor(item: CookItem, compact = false): [string, Color, boolea
   if (action === "wait") return [label + "…", rgb(0.7, 0.85, 1.0), false];
   if (action === "take_out") {
     if (q === D.Q.PERFECT) {
-      if (item.magic) return [compact ? "✨완벽" : `✨ 마법으로 완벽! ${verb}`, GREEN, false];
+      if (item.magic) return [compact ? "✨반짝" : `✨ 반짝반짝! ${verb}`, GREEN, false];
       if (item.holds()) return [`다 쪘어요! ${verb}`, GREEN, false];
       return [compact ? verb + "!" : `지금 ${verb}!`, GREEN, true];
     }

@@ -242,7 +242,7 @@ export class SupplyScene extends Scene {
     vb.appendChild(Ui.heading("마법의 가루", 40, rgb(0.42, 0.18, 0.62), null));
     const info = Ui.inset(10);
     info.appendChild(
-      Ui.label(`재료를 올릴 때 뿌려요 (가루 통 탭 → 재료통 탭)\n✨ ${D.MAGIC_SPEED}배 빨리 익고\n✨ 끝까지 완벽 (안 타요)\n✨ 손님이 값을 ${D.MAGIC_PRICE_MULT}배로!`, 23, Ui.INK, "center", true),
+      Ui.label("어디서 왔는지 아무도 모르는\n반짝반짝 수상한 가루…\n음식에 뿌리면 과연\n무슨 일이 일어날까?", 24, Ui.INK, "center", true),
     );
     vb.appendChild(info);
     vb.appendChild(Ui.heading(`가진 가루 ${GameState.powder}개`, 30, rgb(0.42, 0.18, 0.62), null));

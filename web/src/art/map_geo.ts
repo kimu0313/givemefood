@@ -22,6 +22,7 @@ export const CURB_H = 12.0; // 인도가 길보다 높은 만큼 (px)
 export const YARD = 2.0; // 가게 입구 앞마당 깊이 (타일)
 export const SIDE = 1.0; // 가게 옆 인도 폭 (타일)
 // 가게 경계(길 꼭대기)에는 미식가 이벤트 발판이 서도록 앞뒤를 비운다 (2026-11-16, 예전 1.85 / 3.7)
+export const CORNER_R = 1.6; // 길이 꺾이는 곳을 이 반지름(타일)의 1/4 원으로 둥글게 (2026-11-16 사용자 "길이 너무 각진 것 같아, 모서리 둥글게")
 export const NODE_S0 = 2.5; // 구역 안 첫 스테이지 자리 (길 위 거리, 타일)
 export const NODE_DS = 3.5; // 스테이지 간격 (타일)
 const LOT_ROAD = 5.5;
@@ -132,8 +133,17 @@ export interface MapLayout {
   width: number;
   pathPts: [number, number][]; // 길 가운데 선의 꺾이는 점 (땅 좌표)
   pathS: number[]; // 각 점까지의 길 위 거리
-  roads: GRect[]; // 길바닥 (낮은 곳) 네모들
+  roads: GRect[]; // 길바닥 (낮은 곳) 네모들 — 소품 피하기용 (그리는 길은 roadOutline, 모서리가 둥금)
   endS: number; // 길이 끝나는 곳 (공사 표지)
+  corners: Corner[]; // 길이 90도로 꺾이는 곳 (둥글게 그림)
+}
+
+/** 길이 꺾이는 곳: 길 위 거리 s, 꺾이는 점, 들어오는 방향·나가는 방향 (땅 좌표 단위 벡터) */
+export interface Corner {
+  s: number;
+  p: [number, number];
+  din: [number, number];
+  dout: [number, number];
 }
 
 export function zoneX(i: number): number {
@@ -235,7 +245,14 @@ export function layout(): MapLayout {
     if (k > 0) s += Math.abs(p[0] - pts[k - 1][0]) + Math.abs(p[1] - pts[k - 1][1]);
     pathS.push(s);
   });
-  cache = { zones, width: worldWidth(), pathPts: pts, pathS, roads, endS: s };
+  // 꺾이는 곳 (방향이 바뀌는 점)
+  const corners: Corner[] = [];
+  for (let k = 1; k < pts.length - 1; k++) {
+    const din = unit(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
+    const dout = unit(pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]);
+    if (Math.abs(din[0] - dout[0]) + Math.abs(din[1] - dout[1]) > 1e-6) corners.push({ s: pathS[k], p: pts[k], din, dout });
+  }
+  cache = { zones, width: worldWidth(), pathPts: pts, pathS, roads, endS: s, corners };
   return cache;
 }
 
@@ -257,19 +274,90 @@ function specBounds(spec: BuildingSpec, foot: GRect, fc: [number, number]): R {
   return new R(left.x, top.y, right.x - left.x, f.y - top.y);
 }
 
-/** 길 위 거리 s 의 땅 좌표 (길 가운데 선) */
-export function pathAt(s: number): [number, number] {
+function unit(x: number, y: number): [number, number] {
+  const l = Math.hypot(x, y) || 1;
+  return [x / l, y / l];
+}
+
+/** 꺾이는 곳 근처면 그 곳 (둥근 1/4 원 위) */
+function cornerNear(s: number): Corner | null {
+  for (const c of layout().corners) if (Math.abs(s - c.s) < CORNER_R) return c;
+  return null;
+}
+
+/** 둥근 모서리 위의 점과 접선: 꺾이는 점에서 CORNER_R 앞(A)부터 뒤(B)까지를 1/4 원으로 (길 위 거리는 각진 길 그대로 씀) */
+function onCorner(c: Corner, s: number): { p: [number, number]; t: [number, number] } {
+  const R = CORNER_R;
+  const th = ((s - (c.s - R)) / (2 * R)) * (Math.PI / 2);
+  const ax = c.p[0] - c.din[0] * R;
+  const ay = c.p[1] - c.din[1] * R;
+  const cx = ax + c.dout[0] * R;
+  const cy = ay + c.dout[1] * R;
+  const cos = Math.cos(th);
+  const sin = Math.sin(th);
+  const p: [number, number] = [cx - c.dout[0] * R * cos + c.din[0] * R * sin, cy - c.dout[1] * R * cos + c.din[1] * R * sin];
+  const t = unit(c.dout[0] * sin + c.din[0] * cos, c.dout[1] * sin + c.din[1] * cos);
+  return { p, t };
+}
+
+/** 각진 길 위의 점 (앞뒤 끝 밖은 첫·마지막 방향으로 늘림) */
+function sharpAt(s: number): [number, number] {
   const L = layout();
   const p = L.pathPts;
   const ss = L.pathS;
-  if (s <= ss[0]) return p[0];
+  if (s <= ss[0]) {
+    const d = unit(p[1][0] - p[0][0], p[1][1] - p[0][1]);
+    return [p[0][0] + d[0] * (s - ss[0]), p[0][1] + d[1] * (s - ss[0])];
+  }
   for (let k = 1; k < p.length; k++) {
     if (s <= ss[k]) {
       const t = (s - ss[k - 1]) / Math.max(1e-6, ss[k] - ss[k - 1]);
       return [p[k - 1][0] + (p[k][0] - p[k - 1][0]) * t, p[k - 1][1] + (p[k][1] - p[k - 1][1]) * t];
     }
   }
-  return p[p.length - 1];
+  const n = p.length - 1;
+  const d = unit(p[n][0] - p[n - 1][0], p[n][1] - p[n - 1][1]);
+  return [p[n][0] + d[0] * (s - ss[n]), p[n][1] + d[1] * (s - ss[n])];
+}
+
+/** 길 가운데 선의 방향 (땅 좌표 단위 벡터, 둥근 모서리 반영) */
+export function pathTangent(s: number): [number, number] {
+  const c = cornerNear(s);
+  if (c !== null) return onCorner(c, s).t;
+  const [dx, dy] = pathDir(s);
+  return unit(dx, dy);
+}
+
+/** 그릴 길 테두리 (땅 좌표 다각형): 가운데 선을 양쪽으로 ROAD 만큼 — 꺾이는 곳은 둥글게 */
+export function roadOutline(): [number, number][] {
+  const L = layout();
+  const s0 = L.pathS[0] - 2.0;
+  const s1 = L.endS + 0.5;
+  const ss: number[] = [];
+  for (let s = s0; s < s1; s += 0.5) ss.push(s);
+  for (const c of L.corners) for (let k = 0; k <= 16; k++) ss.push(c.s - CORNER_R + (2 * CORNER_R * k) / 16);
+  ss.push(s1);
+  ss.sort((a, b) => a - b);
+  const left: [number, number][] = [];
+  const right: [number, number][] = [];
+  for (const s of ss) {
+    const [x, y] = pathAt(s);
+    const [tx, ty] = pathTangent(s);
+    left.push([x - ty * ROAD, y + tx * ROAD]);
+    right.push([x + ty * ROAD, y - tx * ROAD]);
+  }
+  return left.concat(right.reverse());
+}
+
+/** 길 위 거리 s 의 땅 좌표 (길 가운데 선, 꺾이는 곳은 둥근 1/4 원 위) */
+export function pathAt(s: number): [number, number] {
+  const c = cornerNear(s);
+  if (c !== null) return onCorner(c, s).p;
+  return pathAtSharp(s);
+}
+
+function pathAtSharp(s: number): [number, number] {
+  return sharpAt(s);
 }
 
 /** 길 위 거리 s 에서 가는 방향 (땅 좌표 단위 벡터) */

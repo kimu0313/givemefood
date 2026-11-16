@@ -52,15 +52,46 @@ export class CustomerView extends Node2D {
   private jolt = 0.0; // 반응할 때 몸이 움찔
   private look = 0; // 일반 손님 생김새 (옷·머리색·목도리·머리 모양)
 
-  /** avoid = 지금 다른 자리에 앉아 있는 손님들의 캐릭터 그림 (같은 사람이 한꺼번에 둘 나오지 않게) */
-  setup(c: CustomerLogic, seat: number, avoid: string[] = []): void {
+  shopTheme = ""; // 가게 분위기 (해변 = 하와이안 셔츠·비키니, 동네 분식집 = 가방 멘 학생)
+  outfit = ""; // 특별한 차림 (CustomerArt.draw 의 outfit)
+  identity = ""; // 이 손님의 얼굴 (캐릭터 그림 이름 또는 "종류:생김새 번호") — 하루에 한 번만 나오게
+
+  /**
+   * avoid = 지금 다른 자리에 앉아 있는 손님들의 캐릭터 그림 (같은 사람이 한꺼번에 둘 나오지 않게),
+   * usedToday = 오늘 이미 온 얼굴들 (2026-11-16 사용자 "같은 손님이 하루에 여러 번 오거나 동시에 있음").
+   * 단골은 정해진 얼굴. 다른 손님은 반반 확률로 오늘 안 쓴 캐릭터 그림 또는 오늘 안 나온 도형 생김새 (그것 말고는 랜덤).
+   */
+  setup(c: CustomerLogic, seat: number, avoid: string[] = [], usedToday: Set<string> | null = null): void {
     this.customer = c;
     this.seat = seat;
     this.look = randi() % 600;
     const pool = ArtAssets.customerSpritePool(c.typeId, c.regularId);
-    let free = pool.filter((n) => !avoid.includes(n));
-    if (free.length === 0) free = pool;
-    if (free.length > 0) this.spriteName = free[randi() % free.length];
+    if (c.regularId !== "" || c.typeId === "gourmet") {
+      if (pool.length > 0) this.spriteName = pool[0];
+      this.identity = `regular:${c.regularId || c.typeId}`;
+    } else {
+      const free = pool.filter((n) => !avoid.includes(n) && !(usedToday?.has(n) ?? false));
+      const useSprite = free.length > 0 && (usedToday === null || randi() % 100 < 50);
+      if (useSprite) {
+        this.spriteName = free[randi() % free.length];
+        this.identity = this.spriteName;
+      } else {
+        // 오늘 안 나온 생김새 번호
+        for (let k = 0; k < 60; k++) {
+          if (!(usedToday?.has(`${c.typeId}:${this.look}`) ?? false)) break;
+          this.look = randi() % 600;
+        }
+        // 동네 차림: 해변 = 하와이안 셔츠 / 비키니 (어른 보통 손님만, 긴 머리), 동네 분식집 = 가방 멘 학생 (보통·급한 손님)
+        const roll = randi() % 100;
+        if (this.shopTheme === "beach" && (c.typeId === "normal" || c.typeId === "hurry") && roll < 65) {
+          this.outfit = c.typeId === "normal" && this.look % 2 === 0 ? "bikini" : "hawaiian";
+        } else if (this.shopTheme === "bunsik" && (c.typeId === "normal" || c.typeId === "hurry") && roll < 55) {
+          this.outfit = "student";
+        }
+        this.identity = `${c.typeId}:${this.look}${this.outfit !== "" ? ":" + this.outfit : ""}`;
+      }
+    }
+    usedToday?.add(this.identity);
     if (c.line !== "") this.say(c.line, 4.0);
   }
 
@@ -173,7 +204,7 @@ export class CustomerView extends Node2D {
       this.drawOverlays(g, head.add(shake), m);
       return;
     }
-    CustomerArt.draw(g, this.customer.typeId, def.body, def.hair, head, m, this.t, this.seat, this.look, this.customer.regularId);
+    CustomerArt.draw(g, this.customer.typeId, def.body, def.hair, head, m, this.t, this.seat, this.look, this.customer.regularId, this.outfit);
     g.resetTransform();
     this.drawOverlays(g, head.add(shake), m);
   }

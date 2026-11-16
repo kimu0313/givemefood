@@ -15,8 +15,55 @@ const SKIN_SHADE = rgb(0.9, 0.7, 0.6);
 const LW = 5.0; // 몸 외곽선
 const FW = 4.0; // 얼굴 선
 // 일반 손님은 사람마다 옷·머리색·목도리·머리 모양이 다르다 (look 번호로 고름)
-const COATS = [rgb(0.27, 0.38, 0.58), rgb(0.58, 0.44, 0.3), rgb(0.42, 0.44, 0.48), rgb(0.3, 0.4, 0.34), rgb(0.5, 0.3, 0.32)];
-const HAIRS = [rgb(0.16, 0.12, 0.12), rgb(0.36, 0.23, 0.15), rgb(0.52, 0.33, 0.2), rgb(0.24, 0.18, 0.16)];
+const COATS = [
+  rgb(0.27, 0.38, 0.58), rgb(0.58, 0.44, 0.3), rgb(0.42, 0.44, 0.48), rgb(0.3, 0.4, 0.34), rgb(0.5, 0.3, 0.32),
+  rgb(0.62, 0.52, 0.36), rgb(0.22, 0.24, 0.3), rgb(0.55, 0.36, 0.5), rgb(0.72, 0.62, 0.5), rgb(0.26, 0.48, 0.52),
+];
+const HAIRS = [rgb(0.16, 0.12, 0.12), rgb(0.36, 0.23, 0.15), rgb(0.52, 0.33, 0.2), rgb(0.24, 0.18, 0.16), rgb(0.62, 0.42, 0.24), rgb(0.1, 0.09, 0.1)];
+// 2026-11-16 사용자 "같은 손님이 하루에 여러 번·동시에 나옴 → 사람 종류를 두 배로": 그림 손님(도형)마다 피부색·모자·안경·머리 모양을 달리한다
+const SKINS = [rgb(0.98, 0.85, 0.73), rgb(0.95, 0.79, 0.65), rgb(0.86, 0.66, 0.5), rgb(1.0, 0.89, 0.8)];
+const HAT_COLORS = [rgb(0.85, 0.3, 0.28), rgb(0.25, 0.45, 0.75), rgb(0.95, 0.75, 0.25), rgb(0.35, 0.6, 0.4), rgb(0.55, 0.4, 0.7), rgb(0.9, 0.9, 0.88)];
+const HURRY_BODIES = [rgb(0.92, 0.56, 0.2), rgb(0.85, 0.28, 0.25), rgb(0.2, 0.55, 0.6), rgb(0.95, 0.78, 0.25)];
+const JINSANG_BODIES = [rgb(0.5, 0.3, 0.56), rgb(0.18, 0.18, 0.2), rgb(0.45, 0.16, 0.2)];
+const DRUNK_BODIES = [rgb(0.58, 0.26, 0.26), rgb(0.25, 0.27, 0.35), rgb(0.4, 0.38, 0.36)];
+
+/** 도형 손님 한 명의 생김새 (look 번호에서): 피부색, 모자(없음·비니·야구 모자·귀마개), 안경, 앞머리 모양, 똥머리 */
+interface Variety {
+  skin: Color;
+  hat: string;
+  hatColor: Color;
+  glasses: boolean;
+  bangs: string;
+  bun: boolean;
+}
+
+function variety(typeId: string, look: number): Variety {
+  let h = (Math.imul(look + 1, 2654435761) >>> 0) ^ (look * 7919);
+  const pick = (n: number) => {
+    const r = h % n;
+    h = Math.floor(h / n) + 1013904223 * (r + 1);
+    h >>>= 0;
+    return r;
+  };
+  const hats = ["none", "none", "beanie", "cap", "earmuff"];
+  const v: Variety = {
+    skin: SKINS[pick(SKINS.length)],
+    hat: hats[pick(hats.length)],
+    hatColor: HAT_COLORS[pick(HAT_COLORS.length)],
+    glasses: pick(4) === 0,
+    bangs: ["default", "part", "regular", "drunk"][pick(4)],
+    bun: pick(4) === 0,
+  };
+  // 종류마다 이미 있는 차림과 겹치지 않게 (급한 손님 = 후드, 진상 = 선글라스, 취객 = 넥타이 머리띠)
+  if (typeId === "hurry" || typeId === "drunk") v.hat = "none";
+  if (typeId !== "normal") {
+    v.bangs = typeId;
+    v.bun = false;
+  }
+  if (typeId === "jinsang") v.glasses = false;
+  if (v.hat === "beanie" || v.hat === "cap") v.bun = false;
+  return v;
+}
 const SCARVES: [Color, Color][] = [
   [rgb(0.84, 0.72, 0.52), rgb(0.58, 0.4, 0.28)],
   [rgb(0.8, 0.28, 0.24), rgb(0.5, 0.14, 0.14)],
@@ -60,14 +107,34 @@ const GOURMET_LOOK: RegularLook = {
   glasses: true, mustache: true, part: true,
 };
 
-export function draw(g: Gfx, typeId: string, body: Color, hair: Color, head: V, m: string, t: number, seat: number, look = 0, regularId = ""): void {
+/**
+ * outfit (가게마다 특별한 차림, 2026-11-16 사용자): "hawaiian" = 하와이안 셔츠 · "bikini" = 비키니 + 어깨에 수건 (해변 가게의 어른 손님만),
+ * "student" = 가방 멘 어린 학생 (동네 분식집, 교복 + 책가방). 빈 문자열이면 손님 종류 기본 차림.
+ */
+export function draw(g: Gfx, typeId: string, body: Color, hair: Color, head: V, m: string, t: number, seat: number, look = 0, regularId = "", outfit = ""): void {
   let scarf = SCARVES[0];
   let longHair = false;
+  let vr: Variety | undefined;
   if (typeId === "normal") {
     body = COATS[look % COATS.length];
-    hair = HAIRS[Math.floor(look / 5.0) % HAIRS.length];
-    scarf = SCARVES[Math.floor(look / 20.0) % SCARVES.length];
+    hair = HAIRS[Math.floor(look / 10.0) % HAIRS.length];
+    scarf = SCARVES[Math.floor(look / 60.0) % SCARVES.length];
     longHair = Math.floor(look / 7.0) % 3 === 0;
+  }
+  if (["normal", "hurry", "jinsang", "drunk"].includes(typeId)) {
+    vr = variety(typeId, look);
+    if (typeId === "hurry") body = HURRY_BODIES[look % HURRY_BODIES.length];
+    if (typeId === "jinsang") body = JINSANG_BODIES[look % JINSANG_BODIES.length];
+    if (typeId === "drunk") body = DRUNK_BODIES[look % DRUNK_BODIES.length];
+    if (typeId !== "normal") hair = HAIRS[Math.floor(look / 5.0) % HAIRS.length];
+    // 차림에 맞는 모자: 해변 = 밀짚모자·머리 위 선글라스, 학생 = 노란 학생 모자
+    if (outfit === "hawaiian" || outfit === "bikini") vr.hat = ["none", "straw", "sunnies"][look % 3];
+    if (outfit === "student") {
+      vr.hat = look % 3 === 0 ? "yellow" : "none";
+      vr.glasses = look % 9 === 0;
+      vr.bangs = "default";
+    }
+    if (outfit === "bikini") longHair = true;
   }
   let rl = typeId === "regular" ? (REGULAR_LOOKS[regularId] ?? REGULAR_LOOKS.guard) : undefined;
   if (typeId === "gourmet") {
@@ -78,8 +145,9 @@ export function draw(g: Gfx, typeId: string, body: Color, hair: Color, head: V, 
     body = rl.body ?? body;
     hair = rl.hair ?? hair;
   }
-  drawBody(g, typeId, body, scarf, rl);
-  drawHead(g, typeId, hair, head, m, t, seat, longHair, rl);
+  if (outfit !== "") drawOutfit(g, outfit, look, vr?.skin ?? SKIN);
+  else drawBody(g, typeId, body, scarf, rl);
+  drawHead(g, typeId, hair, head, m, t, seat, longHair, rl, vr);
 }
 
 // ---------------------------------------------------------------- 몸·옷
@@ -187,9 +255,9 @@ function drawScarf(g: Gfx, col: Color, check: Color): void {
 
 // ---------------------------------------------------------------- 머리·얼굴
 
-function drawHead(g: Gfx, typeId: string, hair: Color, head: V, m: string, t: number, seat: number, longHair = false, rl?: RegularLook): void {
-  let skin = SKIN;
-  if (typeId === "drunk") skin = SKIN.lerp(rgb(1.0, 0.62, 0.56), 0.25);
+function drawHead(g: Gfx, typeId: string, hair: Color, head: V, m: string, t: number, seat: number, longHair = false, rl?: RegularLook, vr?: Variety): void {
+  let skin = vr?.skin ?? SKIN;
+  if (typeId === "drunk") skin = skin.lerp(rgb(1.0, 0.62, 0.56), 0.25);
   // 뒷머리 (긴 머리는 어깨까지)
   let back = FoodArt.ellipsePoints(head.add(v(0, -6)), 68.0, 64.0, 24, PI * 0.92, TAU + PI * 0.08);
   if (longHair) {
@@ -219,8 +287,9 @@ function drawHead(g: Gfx, typeId: string, hair: Color, head: V, m: string, t: nu
   g.polygon(face, skin);
   Ink.shade(g, face, v(-15, 0), skin.lerp(SKIN_SHADE, 0.75));
   Ink.outline(g, face, FW);
-  if (typeId !== "regular") bangs(g, typeId, hair, head);
+  if (typeId !== "regular") bangs(g, vr?.bangs ?? typeId, hair, head);
   drawFace(g, typeId, hair, skin, head, m, t, seat);
+  if (vr !== undefined) accessories(g, vr, hair, head);
   switch (typeId) {
     case "regular": {
       if (rl?.perm) perm(g, hair, head);
@@ -275,6 +344,155 @@ function drawHead(g: Gfx, typeId: string, hair: Color, head: V, m: string, t: nu
         drop.push(p.add(v(Math.cos(a) * 8.0, Math.sin(a) * 8.0)));
       }
       Ink.poly(g, drop, rgb(0.6, 0.84, 1.0, 1.0 - drip * 0.7), 2.5, Ink.LINE.withA(1.0 - drip * 0.7));
+      break;
+    }
+  }
+}
+
+const ALOHA = [rgb(0.15, 0.6, 0.7), rgb(0.9, 0.35, 0.3), rgb(0.98, 0.75, 0.2), rgb(0.35, 0.3, 0.75)];
+const SWIM = [rgb(0.95, 0.35, 0.45), rgb(0.2, 0.6, 0.9), rgb(0.98, 0.78, 0.2), rgb(0.35, 0.75, 0.5)];
+const BAGS = [rgb(0.9, 0.3, 0.3), rgb(0.25, 0.5, 0.85), rgb(0.95, 0.7, 0.2), rgb(0.4, 0.7, 0.45), rgb(0.95, 0.55, 0.7)];
+
+/** 가게마다 특별한 차림 (목 + 몸통). 어깨 모양은 기본 외투와 같은 틀 */
+function drawOutfit(g: Gfx, outfit: string, look: number, skin: Color): void {
+  const torso = [v(-30, 52), v(-74, 64), v(-104, 96), v(-116, 150), v(-130, 320), v(130, 320), v(116, 150), v(104, 96), v(74, 64), v(30, 52)];
+  if (outfit === "student") {
+    // 등에 멘 책가방 (어깨 뒤로 삐죽) → 목 → 교복 (남색 재킷 + 흰 셔츠 + 리본) → 가방끈
+    const bag = BAGS[look % BAGS.length];
+    Ink.rrect(g, new R(-128, 40, 256, 150), bag, 34.0, LW);
+    g.rect(new R(-112, 52, 224, 14), bag.lightened(0.2));
+    Ink.rect(g, new R(-19, 28, 38, 40), skin, Ink.W);
+    const jacket = rgb(0.2, 0.26, 0.42);
+    g.polygon(torso, jacket);
+    Ink.shade(g, torso, v(-30, 0), jacket.darkened(0.2));
+    Ink.poly(g, [v(-30, 52), v(30, 52), v(0, 150)], rgb(0.97, 0.97, 0.95), 3.0);
+    const rib = look % 2 === 0 ? rgb(0.85, 0.2, 0.25) : rgb(0.2, 0.45, 0.8);
+    Ink.poly(g, [v(-2, 70), v(-26, 60), v(-24, 84), v(-2, 76)], rib, 2.5);
+    Ink.poly(g, [v(2, 70), v(26, 60), v(24, 84), v(2, 76)], rib, 2.5);
+    Ink.circle(g, v(0, 73), 6.0, rib.darkened(0.2), 2.5);
+    Ink.poly(g, [v(-30, 52), v(0, 150), v(-20, 200), v(-70, 70)], jacket.darkened(0.12), 3.0);
+    Ink.poly(g, [v(30, 52), v(0, 150), v(20, 200), v(70, 70)], jacket.darkened(0.12), 3.0);
+    // 가방끈 두 줄
+    for (const side of [-1.0, 1.0]) Ink.poly(g, [v(side * 52, 56), v(side * 76, 60), v(side * 92, 320), v(side * 66, 320)], bag.darkened(0.15), 3.0);
+    Ink.rrect(g, new R(26, 120, 50, 18), rgb(0.98, 0.98, 0.95), 4.0, 2.5); // 이름표
+    Ink.outline(g, torso, LW);
+    return;
+  }
+  // 해변: 목·어깨는 맨살
+  Ink.rect(g, new R(-19, 28, 38, 40), skin, Ink.W);
+  if (outfit === "bikini") {
+    g.polygon(torso, skin);
+    Ink.shade(g, torso, v(-30, 0), skin.lerp(SKIN_SHADE, 0.7));
+    const sw = SWIM[look % SWIM.length];
+    // 쇄골 선 + 비키니 윗도리 (목에 묶는 끈)
+    g.arc(v(-34, 70), 18, PI * 1.6, PI * 1.95, SKIN_SHADE.darkened(0.15), 3.0);
+    g.arc(v(34, 70), 18, PI * 1.05, PI * 1.4, SKIN_SHADE.darkened(0.15), 3.0);
+    g.line(v(-12, 40), v(-40, 140), sw.darkened(0.2), 4.0);
+    g.line(v(12, 40), v(40, 140), sw.darkened(0.2), 4.0);
+    for (const side of [-1.0, 1.0]) Ink.poly(g, [v(side * 6, 176), v(side * 66, 168), v(side * 40, 132)], sw, 3.0);
+    g.line(v(-96, 172), v(96, 172), sw.darkened(0.2), 6.0);
+    // 어깨에 걸친 줄무늬 수건
+    const towel = [v(60, 54), v(96, 70), v(118, 140), v(126, 320), v(78, 320), v(70, 150), v(48, 72)];
+    g.polygon(towel, rgb(0.98, 0.97, 0.94));
+    for (const y of [150.0, 200.0, 250.0]) g.line(v(72, y), v(124, y - 4), sw.lightened(0.15), 8.0);
+    Ink.outline(g, towel, 3.0);
+    Ink.outline(g, torso, LW);
+    return;
+  }
+  // 하와이안 셔츠: 화려한 바탕 + 꽃무늬 + 열린 깃 사이 흰 티
+  const base = ALOHA[look % ALOHA.length];
+  g.polygon(torso, base);
+  Ink.shade(g, torso, v(-30, 0), base.darkened(0.2));
+  const petal = [rgb(1.0, 0.95, 0.85), rgb(1.0, 0.55, 0.65), rgb(1.0, 0.85, 0.3)];
+  const spots = [v(-80, 120), v(-40, 210), v(-96, 270), v(60, 110), v(88, 200), v(40, 280), v(-10, 300)];
+  spots.forEach((p, k) => {
+    const pc = petal[(k + look) % petal.length];
+    for (let j = 0; j < 5; j++) {
+      const a = (j / 5) * TAU + k;
+      g.circle(p.add(v(Math.cos(a) * 11, Math.sin(a) * 11)), 9, pc);
+    }
+    g.circle(p, 6, rgb(0.98, 0.8, 0.25));
+    g.polygon([p.add(v(14, 4)), p.add(v(36, -6)), p.add(v(22, 14))], rgb(0.2, 0.55, 0.3));
+  });
+  Ink.poly(g, [v(-28, 52), v(28, 52), v(0, 120)], rgb(0.98, 0.98, 0.96), 3.0);
+  Ink.poly(g, [v(-30, 52), v(0, 120), v(-26, 140), v(-62, 66)], base.lightened(0.12), 3.0);
+  Ink.poly(g, [v(30, 52), v(0, 120), v(26, 140), v(62, 66)], base.lightened(0.12), 3.0);
+  g.line(v(0, 120), v(0, 320), Ink.LINE, 3.0);
+  for (const y of [170.0, 230.0, 290.0]) Ink.circle(g, v(0, y), 5.0, rgb(0.98, 0.95, 0.85), 2.0);
+  Ink.outline(g, torso, LW);
+}
+
+/** 도형 손님 꾸밈: 똥머리 · 안경 · 모자(비니 / 야구 모자 / 귀마개) */
+function accessories(g: Gfx, vr: Variety, hair: Color, head: V): void {
+  if (vr.bun) {
+    Ink.circle(g, head.add(v(0, -72)), 22.0, hair, FW);
+    g.arc(head.add(v(-4, -76)), 12.0, PI * 1.1, PI * 1.6, hair.lightened(0.3), 4.0);
+  }
+  if (vr.glasses) {
+    for (const side of [-1.0, 1.0]) {
+      const e = head.add(v(side * 23.0, 8));
+      Ink.rrect(g, R.of(e.add(v(-18, -14)), v(36, 28)), rgb(1, 1, 1, 0.16), 13.0, FW);
+    }
+    g.line(head.add(v(-5, 4)), head.add(v(5, 4)), Ink.LINE, FW);
+  }
+  const c = vr.hatColor;
+  switch (vr.hat) {
+    case "beanie": {
+      const crown = FoodArt.ellipsePoints(head.add(v(0, -26)), 67.0, 52.0, 20, PI, TAU);
+      g.polygon(crown, c);
+      Ink.shade(g, crown, v(-12, 8), c.darkened(0.25));
+      for (const x of [-36.0, -12.0, 12.0, 36.0]) g.line(head.add(v(x, -70 + Math.abs(x) * 0.5)), head.add(v(x * 1.05, -32)), c.darkened(0.18), 3.0);
+      Ink.outline(g, crown, FW);
+      Ink.rrect(g, R.of(head.add(v(-68, -36)), v(136, 24)), c.lightened(0.15), 11.0, FW);
+      Ink.circle(g, head.add(v(0, -82)), 13.0, c.lightened(0.35), FW);
+      break;
+    }
+    case "cap": {
+      const crown = FoodArt.ellipsePoints(head.add(v(0, -28)), 66.0, 46.0, 18, PI, TAU);
+      g.polygon(crown, c);
+      Ink.shade(g, crown, v(-14, 8), c.darkened(0.3));
+      Ink.outline(g, crown, FW);
+      Ink.poly(g, [head.add(v(-94, -36)), head.add(v(12, -34)), head.add(v(10, -22)), head.add(v(-98, -22))], c.darkened(0.22), FW);
+      Ink.circle(g, head.add(v(0, -74)), 6.0, c.darkened(0.22), 3.0);
+      break;
+    }
+    case "straw": {
+      // 밀짚모자: 넓은 챙 + 리본 띠
+      const straw = rgb(0.93, 0.8, 0.5);
+      Ink.ellipse(g, head.add(v(0, -36)), 104.0, 26.0, straw, FW);
+      const crown = FoodArt.ellipsePoints(head.add(v(0, -40)), 58.0, 44.0, 18, PI, TAU);
+      g.polygon(crown, straw.lightened(0.05));
+      Ink.outline(g, crown, FW);
+      g.rect(new R(head.x - 57, head.y - 52, 114, 12), c);
+      for (let k = 0; k < 6; k++) g.line(head.add(v(-90 + k * 36, -40)), head.add(v(-84 + k * 36, -30)), straw.darkened(0.2), 2.0);
+      break;
+    }
+    case "sunnies": {
+      // 머리 위에 올린 선글라스
+      for (const side of [-1.0, 1.0]) Ink.rrect(g, R.of(head.add(v(side * 24.0 - 19.0, -52)), v(38, 22)), rgb(0.12, 0.12, 0.16), 9.0, 3.0);
+      g.line(head.add(v(-6, -42)), head.add(v(6, -42)), rgb(0.12, 0.12, 0.16), 4.0);
+      break;
+    }
+    case "yellow": {
+      // 초등학생 노란 모자
+      const yc = rgb(1.0, 0.82, 0.18);
+      const crown = FoodArt.ellipsePoints(head.add(v(0, -30)), 66.0, 48.0, 18, PI, TAU);
+      g.polygon(crown, yc);
+      Ink.shade(g, crown, v(-14, 8), yc.darkened(0.25));
+      Ink.outline(g, crown, FW);
+      Ink.ellipse(g, head.add(v(0, -30)), 80.0, 16.0, yc.darkened(0.08), FW);
+      g.polygon(FoodArt.ellipsePoints(head.add(v(0, -30)), 64.0, 10.0, 12, PI, TAU), yc);
+      Ink.circle(g, head.add(v(0, -76)), 7.0, yc.lightened(0.3), 3.0);
+      break;
+    }
+    case "earmuff": {
+      g.arc(head.add(v(0, -10)), 64.0, PI * 1.05, PI * 1.95, Ink.LINE, 9.0);
+      g.arc(head.add(v(0, -10)), 64.0, PI * 1.05, PI * 1.95, c.darkened(0.2), 5.0);
+      for (const side of [-1.0, 1.0]) {
+        const p = head.add(v(side * 60.0, 8));
+        Ink.circle(g, p, 21.0, c, FW);
+        g.circle(p.add(v(-5, -6)), 7.0, c.lightened(0.35));
+      }
       break;
     }
   }

@@ -72,7 +72,7 @@ export const STATIONS: Record<string, StationKindDef> = {
 export const BURNT_COLOR = rgb(0.16, 0.11, 0.09);
 
 // 떡볶이 판·순대 솥 한 번에 만드는 그릇 수. 떡볶이 판은 "판 키우기" 업그레이드(화구 추가 자리)로 1그릇씩 늘어난다
-export const PAN_PORTIONS = 4;
+export const PAN_PORTIONS = 3; // 떡볶이 한 판 (2026-11-16 사용자 "떡볶이 한 번 조리할 때 3인분", 판 키우기로 4 → 5)
 export const STEAMER_PORTIONS = 4;
 
 export interface StationSpot {
@@ -503,7 +503,6 @@ export interface RegularDef {
 
 // 단골 6명 (2026-11-16 사용자: "단골 6명, 젊은 여자도 추가. 첫 번째 가게에 1명, 두 번째에 2명, 세 번째에 3명 확보,
 // 네 번째·다섯 번째 가게엔 왔던 단골들이 오는 식"). 순서 = 처음 만나는 순서 (도감 순서).
-// 그 가게에서 새로 만나는 단골은 2배 자주 온다 (REGULAR_NEW_WEIGHT).
 export const REGULARS: RegularDef[] = [
   { id: "taxi", name: "택시 기사 박씨", shop: "pocha", lines: ["오늘도 고생했어요.", "비 오는 날엔 역시 여기지.", "한 바퀴 돌고 또 올게요."] },
   { id: "student", name: "시험 끝난 대학생", shop: "bunsik", lines: ["시험 끝났어요!", "여기가 제일 맛있어요.", "다음엔 친구들도 데려올게요."] },
@@ -512,7 +511,6 @@ export const REGULARS: RegularDef[] = [
   { id: "grandma", name: "동네 할머니", shop: "market", lines: ["아이고, 장사는 잘 되고?", "우리 손주도 이거 좋아해.", "많이 팔어, 응?"] },
   { id: "guard", name: "경비 아저씨", shop: "market", lines: ["순찰 돌다 왔소.", "따뜻한 국물이 최고지.", "오늘 밤도 무사히."] },
 ];
-export const REGULAR_NEW_WEIGHT = 2.0;
 
 /** 이 가게에 찾아오는 단골 (그 가게까지 만난 단골 전부) */
 export function regularsFor(shopId: string): RegularDef[] {
@@ -534,6 +532,7 @@ export const STOCK_PACK = 5; // 장보기에서 한 번에 사는 양 (인분)
 export const STOCK_MAX = 40; // 메뉴마다 쌓아 둘 수 있는 최대 (인분)
 export const START_MONEY = 20000; // 처음 시작할 때 개업 자금
 export const NEW_SHOP_STOCK = 10;
+// 효과는 게임 안 어디에도 설명하지 않는다 — 써 봐야 안다 (2026-11-16 사용자 "설명 쓰지 마, 플레이어가 모르게, 뭘지 궁금하게").
 // 마법의 가루 (2026-11-16 사용자 "재료 사는 곳에 마법의 가루, 10000원, 음식 넣을 때 사용, 효과는 임의로"):
 // 가루 통을 탭해 준비 → 다음에 올리는 음식에 뿌림 (큰 판·솥은 한 판 전체). 뿌린 음식은 MAGIC_SPEED 배 빨리 익고,
 // 완벽해지면 끝까지 완벽 (타거나 불지 않음), 손님이 감동해서 값을 MAGIC_PRICE_MULT 배로 낸다. 가루는 모든 가게에서 같이 씀.

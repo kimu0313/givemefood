@@ -1,6 +1,6 @@
 // 영업 화면 뒤쪽 배경 (임시 아트). theme 으로 가게마다 다르게 그린다.
 //   alley  골목 포장마차: 참고 일러스트 그림체(먹선 + 셀 채색)의 겨울 저녁 거리 — AlleyArt
-//   bunsik 동네 분식집: 타일 벽, 메뉴판, 창밖 밤거리, 펜던트 조명
+//   bunsik 동네 분식집: 타일 벽, 메뉴판, 창밖 = 길 건너 학교(왼쪽, 창틀에 잘림)와 벚꽃 핀 동네(오른쪽), 펜던트 조명
 //   market 야시장 푸드트럭: 노점 천막들, 사람 실루엣, 알록달록 전구
 //   beach  해변 포장마차: 달밤 바다, 파도, 모래사장, 등대
 //   suljip 실내 포차: 주황 비닐 천막 벽, 벽에 붙은 메뉴, 백열전구
@@ -213,24 +213,31 @@ export class StreetArt extends Node2D {
     g.rect(new R(0, tileTop, sz.x, cy - tileTop), rgb(0.62, 0.8, 0.84));
     for (let x = 0.0; x < sz.x; x += 48.0) g.line(v(x, tileTop), v(x, cy), rgb(1, 1, 1, 0.5), 2.0);
     for (let y = tileTop; y < cy; y += 48.0) g.line(v(0, y), v(sz.x, y), rgb(1, 1, 1, 0.5), 2.0);
-    // 창문 2개: 비 오는 밤거리
-    for (const wx of [sz.x * 0.08, sz.x * 0.72]) {
+    // 창문 2개: 왼쪽 = 길 건너 학교 (창틀에 잘림), 오른쪽 = 벚꽃 핀 동네 (2026-11-16 사용자 "분식 스테이지 배경에 잘려도 되니까 학교")
+    [sz.x * 0.08, sz.x * 0.72].forEach((wx, wi) => {
       const win = new R(wx, wallTop + 110.0, sz.x * 0.2, tileTop - wallTop - 140.0);
       g.rect(win.grow(10.0), rgb(0.55, 0.38, 0.22));
-      g.rect(win, rgb(0.07, 0.08, 0.15));
-      for (let k = 0; k < 5; k++) {
-        const bw = win.w / 5.0;
-        const bh = 40.0 + fmod(k * 37.0, 70.0);
-        g.rect(new R(win.x + k * bw + 4.0, win.endY - bh, bw - 8.0, bh), rgb(0.12, 0.13, 0.2));
-        g.rect(new R(win.x + k * bw + 14.0, win.endY - bh + 12.0, 10.0, 12.0), rgb(1.0, 0.8, 0.45, 0.6));
-      }
-      for (let k = 0; k < 14; k++) {
-        const rx = win.x + fmod(k * 53.0 + this.t * 40.0, win.w);
-        const ry = win.y + fmod(k * 31.0 + this.t * 420.0, win.h - 20.0);
-        g.line(v(rx, ry), v(rx - 3.0, ry + 16.0), rgb(0.7, 0.8, 1.0, 0.5), 1.5);
-      }
+      const ctx = g.ctx;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(win.x, win.y, win.w, win.h);
+      ctx.clip();
+      // 늦은 오후 하늘
+      const sky = ctx.createLinearGradient(0, win.y, 0, win.endY);
+      sky.addColorStop(0, "#9fd0ef");
+      sky.addColorStop(0.75, "#ffe2b8");
+      sky.addColorStop(1, "#ffd3a0");
+      ctx.fillStyle = sky;
+      ctx.fillRect(win.x, win.y, win.w, win.h);
+      g.circle(v(win.x + win.w * 0.2, win.y + 34), 22, rgb(1, 1, 1, 0.75));
+      g.circle(v(win.x + win.w * 0.28, win.y + 30), 28, rgb(1, 1, 1, 0.75));
+      if (wi === 0) this.drawSchool(g, win);
+      else this.drawNeighborhood(g, win);
+      ctx.restore();
+      // 창살 + 유리 반사
       g.line(v(win.center().x, win.y), v(win.center().x, win.endY), rgb(0.55, 0.38, 0.22), 8.0);
-    }
+      g.line(v(win.x + 18, win.endY - 20), v(win.x + 60, win.y + 20), rgb(1, 1, 1, 0.22), 10.0);
+    });
     // 가운데 메뉴판
     const board = new R(sz.x * 0.33, wallTop + 96.0, sz.x * 0.34, 190.0);
     FoodArt.roundedRect(g, board.grow(8.0), rgb(0.45, 0.28, 0.15), 14.0);
@@ -251,6 +258,76 @@ export class StreetArt extends Node2D {
       g.polygon([v(lx - 34.0, ly), v(lx - 14.0, ly - 22.0), v(lx + 14.0, ly - 22.0), v(lx + 34.0, ly)], rgb(0.2, 0.45, 0.4));
       g.circle(v(lx, ly + 2.0), 46.0, rgb(1.0, 0.9, 0.6, 0.18));
       g.circle(v(lx, ly + 2.0), 10.0, rgb(1.0, 0.95, 0.75));
+    }
+  }
+
+  /** 창밖 길 건너 학교: 시계탑 + 교문 간판 "햇살초등학교" + 줄줄이 창문 + 운동장 울타리 (창틀에 잘려도 됨) */
+  private drawSchool(g: Gfx, win: R): void {
+    const ground = win.endY - 26;
+    const wall = rgb(0.98, 0.9, 0.78);
+    const trim = rgb(0.72, 0.42, 0.3);
+    // 본관 (창보다 넓게 — 양옆이 잘림)
+    const b = new R(win.x - 70, ground - 150, win.w + 140, 150);
+    FoodArt.roundedRect(g, b, wall, 4, rgb(0.45, 0.32, 0.22), 3);
+    g.rect(new R(b.x, b.y, b.w, 12), trim);
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 9; col++) {
+        const x = b.x + 22 + col * ((b.w - 30) / 9);
+        const y = b.y + 24 + row * 40;
+        g.rect(new R(x, y, 26, 24), rgb(0.55, 0.78, 0.92));
+        g.line(v(x + 13, y), v(x + 13, y + 24), rgb(1, 1, 1, 0.6), 2);
+      }
+    }
+    // 가운데 시계탑
+    const tx = win.center().x;
+    const tw = 70;
+    FoodArt.roundedRect(g, new R(tx - tw / 2, b.y - 70, tw, 80), wall.darkened(0.04), 4, rgb(0.45, 0.32, 0.22), 3);
+    g.polygon([v(tx - tw / 2 - 8, b.y - 70), v(tx + tw / 2 + 8, b.y - 70), v(tx, b.y - 104)], trim);
+    g.circle(v(tx, b.y - 34), 22, rgb(1, 1, 1));
+    g.arc(v(tx, b.y - 34), 22, 0, Math.PI * 2, rgb(0.3, 0.22, 0.16), 3);
+    g.line(v(tx, b.y - 34), v(tx, b.y - 48), rgb(0.2, 0.15, 0.1), 3);
+    g.line(v(tx, b.y - 34), v(tx + 10, b.y - 30), rgb(0.2, 0.15, 0.1), 3);
+    // 학교 이름 간판
+    FoodArt.roundedRect(g, new R(tx - 90, b.y + 4, 180, 26), rgb(0.2, 0.45, 0.3), 5);
+    FoodArt.text(g, "햇살초등학교", v(tx, b.y + 17), 18, rgb(1, 1, 1), 176);
+    // 운동장 울타리 + 나무
+    g.rect(new R(win.x, ground, win.w, 26), rgb(0.85, 0.72, 0.5));
+    for (let x = win.x - 10; x < win.endX + 10; x += 22) g.line(v(x, ground + 4), v(x, ground - 22), rgb(0.35, 0.55, 0.4), 4);
+    g.line(v(win.x, ground - 16), v(win.endX, ground - 16), rgb(0.35, 0.55, 0.4), 4);
+    g.circle(v(win.x + 30, ground - 56), 34, rgb(0.4, 0.68, 0.38));
+    g.rect(new R(win.x + 26, ground - 30, 8, 30), rgb(0.45, 0.3, 0.2));
+  }
+
+  /** 창밖 오른쪽: 문구점·주택 + 벚꽃 나무 (꽃잎이 날림) */
+  private drawNeighborhood(g: Gfx, win: R): void {
+    const ground = win.endY - 26;
+    const houses: [number, number, Color, string][] = [
+      [win.x - 20, 120, rgb(0.93, 0.85, 0.7), "문구"],
+      [win.x + win.w * 0.42, 150, rgb(0.85, 0.66, 0.52), ""],
+      [win.x + win.w * 0.75, 110, rgb(0.78, 0.82, 0.88), ""],
+    ];
+    for (const [x, h, col, sign] of houses) {
+      const r = new R(x, ground - h, win.w * 0.36, h);
+      FoodArt.roundedRect(g, r, col, 3, rgb(0.45, 0.32, 0.22), 3);
+      for (let k = 0; k < 2; k++) g.rect(new R(r.x + 16 + k * 44, r.y + 20, 28, 26), rgb(0.6, 0.8, 0.92));
+      if (sign !== "") {
+        FoodArt.roundedRect(g, new R(r.x + 10, r.endY - 44, r.w - 20, 22), rgb(0.25, 0.55, 0.85), 4);
+        FoodArt.text(g, sign, v(r.center().x, r.endY - 33), 16, rgb(1, 1, 1), r.w - 24);
+      }
+    }
+    g.rect(new R(win.x, ground, win.w, 26), rgb(0.8, 0.78, 0.74));
+    // 벚꽃 나무 + 날리는 꽃잎
+    const tc = v(win.endX - 50, ground - 80);
+    g.rect(new R(tc.x - 6, tc.y + 20, 12, 60), rgb(0.45, 0.3, 0.22));
+    for (const [dx, dy, r] of [
+      [0, 0, 44],
+      [-34, 14, 30],
+      [30, 16, 30],
+    ]) g.circle(tc.add(v(dx, dy)), r, rgb(1.0, 0.72, 0.82));
+    for (let k = 0; k < 8; k++) {
+      const px = win.x + fmod(k * 61.0 + this.t * 22.0, win.w);
+      const py = win.y + fmod(k * 43.0 + this.t * 30.0, win.h);
+      g.circle(v(px, py), 3.5, rgb(1.0, 0.75, 0.85, 0.9));
     }
   }
 

@@ -41,7 +41,7 @@ const THEMES: Record<string, Theme> = {
   bunsik: {
     night: false, style: "blocks", base: rgb(0.83, 0.74, 0.6), alt: rgb(0.76, 0.52, 0.44), grout: rgb(0.62, 0.53, 0.42), seam: rgb(0.5, 0.42, 0.32), tree: "blossom",
     house: [
-      { wall: rgb(0.93, 0.87, 0.74), roof: rgb(0.32, 0.55, 0.52), trim: rgb(0.5, 0.36, 0.26), window: rgb(0.62, 0.8, 0.9), floors: 2, sign: "문구점", awning: [rgb(0.25, 0.55, 0.85), rgb(0.98, 0.98, 0.95)] },
+      { wall: rgb(0.98, 0.9, 0.78), roof: rgb(0.72, 0.42, 0.3), trim: rgb(0.5, 0.36, 0.26), window: rgb(0.62, 0.8, 0.9), floors: 3, sign: "햇살초등학교", signBg: rgb(0.2, 0.45, 0.3), signFg: rgb(1, 1, 1) },
       { wall: rgb(0.86, 0.66, 0.5), roof: null, trim: rgb(0.46, 0.32, 0.24), window: rgb(0.62, 0.8, 0.9), floors: 1, sign: "슈퍼", signBg: rgb(0.2, 0.55, 0.35), signFg: rgb(1, 1, 1) },
     ],
   },
@@ -364,7 +364,48 @@ export class MapArt extends Node2D {
     this.drawGround(g, L);
     this.drawRoad(g, L);
     this.drawSprites(g, L);
+    this.drawWeather(g, L);
     this.drawDim(g, L);
+  }
+
+  /** 골목 포장마차 동네엔 비, 동네 분식집 동네엔 벚꽃 잎 (화면에 보이는 구역만) */
+  private drawWeather(g: Gfx, L: G.MapLayout): void {
+    const tt = this.t;
+    for (const z of L.zones) {
+      const theme = z.shop?.theme ?? "lot";
+      if (!this.seen(z.x0, z.x1)) continue;
+      const w = z.x1 - z.x0;
+      if (theme === "alley") {
+        const ctx = g.ctx;
+        ctx.save();
+        ctx.strokeStyle = "rgba(190,210,255,0.32)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let k = 0; k < 150; k++) {
+          const x = z.x0 + fmod(k * 137.5 + tt * 90, w);
+          const y = 110 + fmod(k * 97.3 + tt * 820, 980);
+          ctx.moveTo(x, y);
+          ctx.lineTo(x - 7, y + 24);
+        }
+        ctx.stroke();
+        ctx.restore();
+      } else if (theme === "bunsik") {
+        for (let k = 0; k < 36; k++) {
+          const x = z.x0 + fmod(k * 211.7 + tt * 26 + Math.sin(tt * 0.9 + k) * 26, w);
+          const y = 120 + fmod(k * 131.1 + tt * 46, 940);
+          const a = tt * 1.8 + k;
+          const ctx = g.ctx;
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.rotate(a);
+          ctx.fillStyle = k % 3 === 0 ? "rgba(255,255,255,0.85)" : "rgba(255,170,200,0.9)";
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 6, 3.4 * Math.abs(Math.cos(a * 0.7)) + 1.2, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+    }
   }
 
   // ---------------------------------------------------------------- 땅
@@ -544,6 +585,14 @@ export class MapArt extends Node2D {
       ctx.stroke();
     }
     ctx.restore();
+    // 먼바다의 작은 배들과 갈매기
+    I.boat(g, v(z.x0 + 250, 226), 0.9, this.t, rgb(0.85, 0.25, 0.2));
+    I.boat(g, v(z.x1 - 330, 212), 0.75, this.t + 2.0, rgb(0.2, 0.45, 0.8));
+    for (let k = 0; k < 4; k++) {
+      const x = z.x0 + fmod(k * 410 + this.t * (30 + k * 6), z.x1 - z.x0);
+      const y = 150 + Math.sin(this.t * 0.8 + k * 2.1) * 18 + k * 12;
+      I.seagull(g, v(x, y), 0.9 + (k % 2) * 0.2, this.t + k);
+    }
   }
 
   // ---------------------------------------------------------------- 길 (인도보다 낮은 돌길)
@@ -558,10 +607,23 @@ export class MapArt extends Node2D {
       for (let k = 1; k < 4; k++) p.lineTo(d[k].x, d[k].y);
       p.closePath();
     };
-    const rects = L.roads.concat(L.zones.filter((z) => z.notch !== null).map((z) => z.notch as GRect));
-    for (const r of rects) {
-      add(top, r, G.CURB_H);
-      add(floor, r, 0.0);
+    // 큰 길 = 모서리가 둥근 띠 하나 (G.roadOutline), ∞ 샛길 앞마당은 네모
+    const outline = G.roadOutline();
+    for (const [p, h] of [
+      [top, G.CURB_H],
+      [floor, 0.0],
+    ] as [Path2D, number][]) {
+      outline.forEach(([gx, gy], k) => {
+        const q = iso(gx, gy, h);
+        if (k === 0) p.moveTo(q.x, q.y);
+        else p.lineTo(q.x, q.y);
+      });
+      p.closePath();
+    }
+    for (const z of L.zones) {
+      if (z.notch === null) continue;
+      add(top, z.notch, G.CURB_H);
+      add(floor, z.notch, 0.0);
     }
     this.roadPaths = { top, floor };
     return this.roadPaths;
@@ -571,7 +633,7 @@ export class MapArt extends Node2D {
     const ctx = g.ctx;
     const ps = this.paths(L);
     ctx.save();
-    ctx.lineJoin = "miter";
+    ctx.lineJoin = "round";
     // 연석 윗돌 (인도 쪽 테두리) → 구멍(연석 옆면 색) → 그 안에 길바닥
     ctx.strokeStyle = I.INK.withA(0.55).css();
     ctx.lineWidth = 14;
@@ -584,6 +646,12 @@ export class MapArt extends Node2D {
     ctx.clip(ps.top);
     ctx.fillStyle = tilePattern(ctx, "road", "pave", ROAD_BASE, ROAD_BASE, ROAD_GROUT, 0.0) ?? ROAD_BASE.css();
     ctx.fill(ps.floor);
+    // 동네 분식집 앞 횡단보도 (학교 앞) — 발판 사이에
+    for (const z of L.zones) {
+      if (z.shop?.theme !== "bunsik") continue;
+      const base = z.index * 2 * G.ARM;
+      for (const sOff of [4.25, 18.25]) this.crosswalk(g, base + sOff);
+    }
     // 연석 옆면 아래 그늘
     ctx.save();
     ctx.translate(0, 8);
@@ -598,16 +666,39 @@ export class MapArt extends Node2D {
     if (this.seen(iso(ex, ey).x - 120, iso(ex, ey).x + 120)) this.barrier(g, ex + 0.2, ey);
   }
 
+  /** 길을 가로지르는 흰 줄무늬 (길 방향으로 긴 줄 5개를 길 폭에 나란히) */
+  private crosswalk(g: Gfx, s: number): void {
+    const [cx, cy] = G.pathAt(s);
+    const [tx, ty] = G.pathTangent(s);
+    const nx = -ty;
+    const ny = tx;
+    const p = iso(cx, cy);
+    if (!this.seen(p.x - 120, p.x + 120)) return;
+    for (let k = -2; k <= 2; k++) {
+      const o = k * 0.36;
+      const pts: V[] = [];
+      for (const [a, b] of [
+        [-0.42, -0.1],
+        [0.42, -0.1],
+        [0.42, 0.1],
+        [-0.42, 0.1],
+      ]) {
+        pts.push(iso(cx + tx * a + nx * (o + b), cy + ty * a + ny * (o + b)));
+      }
+      g.polygon(pts, rgb(0.98, 0.97, 0.94, 0.88));
+    }
+  }
+
   /** 가운데 안내선: 지나온 길 실선, 갈 길 점선, ∞ 샛길 (열리면 파랑) */
   private drawGuide(g: Gfx, L: G.MapLayout): void {
     const ctx = g.ctx;
+    // 길 위 거리를 잘게 나눠 따라감 (꺾이는 곳은 둥글게)
     const line = (s0: number, s1: number): V[] => {
       const out: V[] = [];
       if (s1 <= s0) return out;
-      const [ax, ay] = G.pathAt(s0);
-      out.push(iso(ax, ay));
-      for (let k = 0; k < L.pathPts.length; k++) {
-        if (L.pathS[k] > s0 && L.pathS[k] < s1) out.push(iso(L.pathPts[k][0], L.pathPts[k][1]));
+      for (let s = s0; s < s1; s += 0.25) {
+        const [x, y] = G.pathAt(s);
+        out.push(iso(x, y));
       }
       const [bx, by] = G.pathAt(s1);
       out.push(iso(bx, by));
@@ -779,25 +870,58 @@ export class MapArt extends Node2D {
       tryPlace(5, 0.6, 50, 40, (gx, gy, k) => add(gx, gy, 45, (g) => I.bush(g, gx, gy, 1.0, k % 2 === 0 ? flower : null)));
       switch (theme) {
         case "alley":
+          // 비 오는 골목 포장마차: 빨간 등 줄, 플라스틱 테이블 + 소주, 자판기, 소주 상자
+          tryPlace(2, 1.4, 120, 110, (gx, gy) => add(gx + 1.0, gy, 110, (g) => I.lanternLine(g, [gx - 1.0, gy], [gx + 1.0, gy], 1.0, this.t)));
+          tryPlace(3, 0.8, 50, 60, (gx, gy, k) => add(gx, gy, 60, (g) => I.tableSet(g, gx, gy, k % 2 === 0 ? rgb(0.86, 0.22, 0.18) : rgb(0.2, 0.45, 0.8))));
           tryPlace(2, 0.5, 70, 40, (gx, gy, k) => add(gx, gy, 40, (g) => (k === 0 ? I.vending(g, gx, gy, rgb(0.85, 0.2, 0.18), true) : I.crates(g, gx, gy, rgb(0.2, 0.55, 0.3), 3))));
           break;
         case "bunsik":
-          tryPlace(3, 0.9, 40, 60, (gx, gy, k) => add(gx, gy, 60, (g) => I.bench(g, gx, gy, k % 2 === 0 ? "gx" : "gy")));
+          // 학교 앞 동네 분식집: 어린이 보호구역 표지판, 자전거, 벤치, 꽃 화분 (길엔 횡단보도, 벚꽃 잎이 날림)
+          tryPlace(2, 0.5, 120, 50, (gx, gy) => add(gx, gy, 50, (g) => I.schoolSign(g, gx, gy)));
+          tryPlace(3, 0.6, 40, 40, (gx, gy, k) => add(gx, gy, 40, (g) => I.bicycle(g, gx, gy, [rgb(0.25, 0.55, 0.85), rgb(0.95, 0.45, 0.6), rgb(0.35, 0.7, 0.4)][k % 3])));
+          tryPlace(2, 0.9, 40, 60, (gx, gy, k) => add(gx, gy, 60, (g) => I.bench(g, gx, gy, k % 2 === 0 ? "gx" : "gy")));
           tryPlace(3, 0.5, 50, 40, (gx, gy) => add(gx, gy, 40, (g) => I.planter(g, gx, gy, rgb(1.0, 0.85, 0.35))));
           break;
         case "market":
-          tryPlace(4, 0.5, 40, 40, (gx, gy, k) => add(gx, gy, 40, (g) => I.crates(g, gx, gy, k % 2 === 0 ? rgb(0.95, 0.65, 0.15) : rgb(0.25, 0.5, 0.8), 2)));
-          tryPlace(4, 0.35, 30, 20, (gx, gy) => add(gx, gy, 20, (g) => I.stool(g, gx, gy)));
+          // 야시장: 줄무늬 천막 노점들, 과일 상자, 의자
+          tryPlace(3, 1.0, 110, 80, (gx, gy, k) => {
+            const tents: [Color, Color][] = [
+              [rgb(0.92, 0.3, 0.25), rgb(1.0, 0.92, 0.75)],
+              [rgb(0.25, 0.55, 0.85), rgb(1.0, 0.95, 0.85)],
+              [rgb(0.95, 0.7, 0.15), rgb(0.9, 0.35, 0.25)],
+            ];
+            const goods = [
+              [rgb(0.95, 0.35, 0.3), rgb(1.0, 0.75, 0.2), rgb(0.5, 0.75, 0.3)],
+              [rgb(0.95, 0.85, 0.6), rgb(0.85, 0.55, 0.3)],
+              [rgb(1.0, 0.6, 0.75), rgb(0.6, 0.85, 1.0), rgb(1.0, 0.95, 0.5)],
+            ];
+            add(gx, gy, 80, (g) => I.stall(g, gx, gy, tents[k % 3][0], tents[k % 3][1], goods[k % 3], 1.0));
+          });
+          tryPlace(3, 0.5, 40, 40, (gx, gy, k) => add(gx, gy, 40, (g) => I.crates(g, gx, gy, k % 2 === 0 ? rgb(0.95, 0.65, 0.15) : rgb(0.25, 0.5, 0.8), 2)));
+          tryPlace(3, 0.35, 30, 20, (gx, gy) => add(gx, gy, 20, (g) => I.stool(g, gx, gy)));
           break;
         case "beach":
+          // 해변: 서핑보드, 모래성 (바다엔 배와 갈매기)
+          tryPlace(2, 0.5, 100, 30, (gx, gy, k) => add(gx, gy, 30, (g) => I.surfboard(g, gx, gy, k === 0 ? rgb(0.98, 0.55, 0.2) : rgb(0.3, 0.75, 0.85), k === 0 ? -0.12 : 0.15)));
+          tryPlace(1, 0.6, 50, 40, (gx, gy) => add(gx, gy, 40, (g) => I.sandcastle(g, gx, gy)));
           tryPlace(4, 1.0, 100, 80, (gx, gy, k) =>
             add(gx, gy, 80, (g) => I.parasol(g, gx, gy, [rgb(0.95, 0.3, 0.25), rgb(0.2, 0.5, 0.9), rgb(0.98, 0.75, 0.2), rgb(0.3, 0.7, 0.45)][k % 4], rgb(0.98, 0.97, 0.94))),
           );
           tryPlace(3, 0.7, 30, 50, (gx, gy, k) => add(gx, gy, 50, (g) => I.deckChair(g, gx, gy, k % 2 === 0 ? rgb(0.2, 0.55, 0.9) : rgb(0.95, 0.5, 0.3))));
           break;
         case "suljip":
-          tryPlace(3, 0.5, 40, 40, (gx, gy, k) => add(gx, gy, 40, (g) => (k === 0 ? I.vending(g, gx, gy, rgb(0.2, 0.4, 0.75), true) : I.crates(g, gx, gy, rgb(0.2, 0.55, 0.3), 2))));
-          tryPlace(4, 0.35, 30, 20, (gx, gy) => add(gx, gy, 20, (g) => I.stool(g, gx, gy)));
+          // 밤 도심 실내 포차 거리: 네온 간판, 세워 둔 택시, 자판기, 소주 상자
+          tryPlace(3, 0.5, 140, 70, (gx, gy, k) => {
+            const signs: [string, Color][] = [
+              ["소주", rgb(0.3, 0.95, 0.55)],
+              ["포차", rgb(1.0, 0.4, 0.75)],
+              ["24시", rgb(0.4, 0.8, 1.0)],
+            ];
+            add(gx, gy, 70, (g) => I.neonSign(g, gx, gy, signs[k % 3][0], signs[k % 3][1], this.t, k * 2.3 + z.index));
+          });
+          tryPlace(2, 1.3, 50, 90, (gx, gy) => add(gx, gy, 90, (g) => I.taxi(g, gx, gy)));
+          tryPlace(2, 0.5, 40, 40, (gx, gy, k) => add(gx, gy, 40, (g) => (k === 0 ? I.vending(g, gx, gy, rgb(0.2, 0.4, 0.75), true) : I.crates(g, gx, gy, rgb(0.2, 0.55, 0.3), 2))));
+          tryPlace(3, 0.35, 30, 20, (gx, gy) => add(gx, gy, 20, (g) => I.stool(g, gx, gy)));
           break;
         default:
           tryPlace(5, 0.4, 40, 20, (gx, gy) => add(gx, gy, 20, (g) => I.cone(g, gx, gy)));
