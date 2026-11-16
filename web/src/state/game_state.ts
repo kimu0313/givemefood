@@ -60,7 +60,10 @@ export class GameStateClass {
 
   level = 1; // 지금까지 열린 가장 높은 레벨 (여기까지 지도에서 고를 수 있다)
   storyCleared = false; // 마지막 가게 마지막 레벨까지 깸
-  wallet = 0;
+  wallet = D.START_MONEY; // 처음 시작하면 개업 자금. 외상으로 재료를 사면 잠깐 마이너스가 될 수 있다 (다음 정산에서 갚음)
+  stock: Record<string, Record<string, number>> = {}; // 가게 id → 메뉴 → 사 둔 재료 (인분)
+  powder = 0; // 마법의 가루 (모든 가게에서 같이 씀)
+  tutorial = "start"; // 처음 하는 사람 튜토리얼 단계: start(지도) → buy(장보기) → upgrade → stage → cook(영업) → "" (끝)
   upgrades: Record<string, UpgradeDict> = {}; // 가게 id → {burners, heat, stove} 단계
   regulars: IntDict = {}; // 단골 id → 방문(서빙 성공) 횟수
   bestEndless: IntDict = {}; // 가게 id → 무한 영업 최고 매출
@@ -127,6 +130,9 @@ export class GameStateClass {
     if (this.wallet < cost) return false;
     this.wallet -= cost;
     this.level = Math.max(this.level, D.shopDef(shopId).first_level);
+    // 개업 선물: 첫 메뉴 재료 (돈을 다 써서 가게를 사도 바로 영업할 수 있게)
+    const first = D.shopDef(shopId).menus[0];
+    this.addStock(shopId, first, D.NEW_SHOP_STOCK);
     this.justOpened = shopId;
     this.justUnlocked = this.level;
     this.mapShop = shopId;
@@ -286,6 +292,13 @@ export class GameStateClass {
     this.lastResult = { ...r, regulars: [...r.regulars], settled: false };
     for (const id of r.regulars ?? []) this.regulars[id] = (this.regulars[id] ?? 0) + 1;
     if (r.event && r.gourmet !== undefined) this.events[r.shop] = Math.max(this.events[r.shop] ?? 0, r.gourmet.grade);
+    if ((r.powder_used ?? 0) > 0) this.powder = Math.max(0, this.powder - (r.powder_used ?? 0));
+    if (r.stock_left !== undefined) {
+      // 영업에서 쓰고 남은 재료
+      const sh: Record<string, number> = {};
+      for (const m of Object.keys(r.stock_left)) sh[m] = clamp(r.stock_left[m], 0, D.STOCK_MAX);
+      this.stock[r.shop] = { ...(this.stock[r.shop] ?? {}), ...sh };
+    }
     if (r.endless) {
       const sid = r.shop ?? "pocha";
       this.bestEndless[sid] = Math.max(this.bestEndlessFor(sid), r.revenue);
@@ -301,7 +314,7 @@ export class GameStateClass {
     let gain = r.revenue;
     if (doubled && gain > 0) gain *= 2;
     if (r.event) gain += r.gourmet?.reward ?? 0; // 미식가 보상
-    this.wallet = Math.max(0, this.wallet + gain);
+    this.wallet += gain; // 외상(마이너스)이 있으면 여기서 갚는다
     this.justCleared = false;
     this.justOpened = "";
     this.justShopCleared = "";
@@ -342,6 +355,9 @@ export class GameStateClass {
       best_endless: this.bestEndless,
       level_stars: this.levelStars,
       events: this.events,
+      stock: this.stock,
+      powder: this.powder,
+      tutorial: this.tutorial,
     };
   }
 
@@ -424,7 +440,91 @@ export class GameStateClass {
 
   /** 게스트로 무언가 해 둔 게 있는지 (새 계정을 만들 때 옮겨 갈 기록) */
   hasProgress(): boolean {
-    return this.level > 1 || this.storyCleared || this.wallet > 0 || Object.keys(this.levelStars).length > 0 || Object.keys(this.regulars).length > 0 || Object.keys(this.events).length > 0;
+    return this.level > 1 || this.storyCleared || this.wallet !== D.START_MONEY || Object.keys(this.levelStars).length > 0 || Object.keys(this.regulars).length > 0 || Object.keys(this.events).length > 0;
+  }
+
+  // ---------------------------------------------------------------- 재료 (장보기)
+
+  stockOf(shopId: string, menuId: string): number {
+    return this.stock[shopId]?.[menuId] ?? 0;
+  }
+
+  /** 그 가게 메뉴들의 남은 재료 (영업에 넘겨줌) */
+  stockFor(shopId: string): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const m of D.shopDef(shopId).menus) out[m] = this.stockOf(shopId, m);
+    return out;
+  }
+
+  private addStock(shopId: string, menuId: string, n: number): void {
+    const sh = this.stock[shopId] ?? {};
+    sh[menuId] = clamp((sh[menuId] ?? 0) + n, 0, D.STOCK_MAX);
+    this.stock[shopId] = sh;
+  }
+
+  /** 더 살 수 있는 양 (창고가 꽉 차면 0) */
+  stockRoom(shopId: string, menuId: string): number {
+    return Math.max(0, D.STOCK_MAX - this.stockOf(shopId, menuId));
+  }
+
+  /** 재료 n인분 사기 (창고 남은 자리만큼). credit = 돈이 모자라면 외상 (지갑이 마이너스, 다음 정산에서 갚음) */
+  buyStock(shopId: string, menuId: string, n: number, credit = false): boolean {
+    const k = Math.min(n, this.stockRoom(shopId, menuId));
+    if (k <= 0) return false;
+    const cost = k * D.ingredientCost(menuId);
+    if (this.wallet < cost && !credit) return false;
+    this.wallet -= cost;
+    this.addStock(shopId, menuId, k);
+    this.saveGame();
+    this.changed.emit();
+    return true;
+  }
+
+  /** 그 스테이지 하루에 모자라는 재료 (메뉴 → 인분, 모자란 것만) */
+  stockShortage(level: number): Record<string, number> {
+    const sid = D.shopForLevel(level).id;
+    const need = D.stockNeed(level);
+    const out: Record<string, number> = {};
+    for (const m of Object.keys(need)) {
+      const short = need[m] - this.stockOf(sid, m);
+      if (short > 0) out[m] = short;
+    }
+    return out;
+  }
+
+  shortageCost(level: number): number {
+    const short = this.stockShortage(level);
+    return Object.keys(short).reduce((n, m) => n + short[m] * D.ingredientCost(m), 0);
+  }
+
+  /** 모자라는 재료를 한 번에 사기 (돈이 모자라면 외상 — 진행이 막히지 않게) */
+  buyShortage(level: number): number {
+    const sid = D.shopForLevel(level).id;
+    const short = this.stockShortage(level);
+    let spent = 0;
+    for (const m of Object.keys(short)) {
+      const before = this.wallet;
+      if (this.buyStock(sid, m, short[m], true)) spent += before - this.wallet;
+    }
+    return spent;
+  }
+
+  /** 마법의 가루 하나 사기 */
+  buyPowder(): boolean {
+    if (this.powder >= D.POWDER_MAX || this.wallet < D.POWDER_PRICE) return false;
+    this.wallet -= D.POWDER_PRICE;
+    this.powder += 1;
+    this.saveGame();
+    this.changed.emit();
+    return true;
+  }
+
+  // ---------------------------------------------------------------- 튜토리얼
+
+  /** 다음 단계로 (끝이면 "") */
+  setTutorial(step: string): void {
+    this.tutorial = step;
+    this.saveGame();
   }
 
   /**
@@ -516,11 +616,33 @@ export class GameStateClass {
 
   /** 저장 데이터 적용 (버전 1·2 = "일차" 시절, 버전 3 = 가게마다 레벨 10개, 4·5 = 5스테이지 → 지금 레벨로 옮김) */
   applySave(d: Record<string, unknown>): void {
+    this.applyProgress(d);
+    // 재료: 예전 저장(재료가 없던 때)은 열린 가게의 열린 메뉴마다 10인분씩 넣어 준다 (바로 이어서 영업할 수 있게)
+    this.stock = {};
+    const st = d["stock"];
+    if (isDict(st)) {
+      for (const sid of Object.keys(st)) {
+        if (!D.SHOPS.some((s) => s.id === sid)) continue;
+        for (const [m, n] of Object.entries(intDict(st[sid]))) this.addStock(sid, m, n);
+      }
+    } else {
+      for (const sh of D.SHOPS) {
+        if (!this.shopOpened(sh.id)) continue;
+        for (const m of sh.menus) if (D.menuUnlockLevel(m) <= Math.max(this.level, sh.first_level)) this.addStock(sh.id, m, D.STOCK_PACK * 2);
+      }
+    }
+    this.powder = clamp(toInt(d["powder"], 0), 0, D.POWDER_MAX);
+    // 튜토리얼: 저장에 없으면 (예전 저장) 이미 해 본 사람은 건너뜀
+    const tut = d["tutorial"];
+    this.tutorial = typeof tut === "string" ? tut : this.hasProgress() ? "" : "start";
+  }
+
+  private applyProgress(d: Record<string, unknown>): void {
     const version = toInt(d["version"], 1);
     this.events = {};
     for (const [k, val] of Object.entries(intDict(d["events"]))) if (D.eventFor(k) !== null) this.events[k] = clamp(val, 0, D.MAX_STARS);
     this.storyCleared = false;
-    this.wallet = Math.max(0, toInt(d["wallet"], 0));
+    this.wallet = clamp(toInt(d["wallet"], 0), -1000000000, 1000000000000);
     this.regulars = intDict(d["regulars"]);
     this.upgrades = {};
     this.bestEndless = {};
@@ -578,7 +700,10 @@ export class GameStateClass {
   private clearProgress(): void {
     this.level = 1;
     this.storyCleared = false;
-    this.wallet = 0;
+    this.wallet = D.START_MONEY;
+    this.stock = {};
+    this.powder = 0;
+    this.tutorial = "start";
     this.upgrades = {};
     this.regulars = {};
     this.bestEndless = {};

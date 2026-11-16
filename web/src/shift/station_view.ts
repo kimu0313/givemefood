@@ -33,12 +33,13 @@ export function hintFor(item: CookItem, compact = false): [string, Color, boolea
   if (action === "wait") return [label + "…", rgb(0.7, 0.85, 1.0), false];
   if (action === "take_out") {
     if (q === D.Q.PERFECT) {
+      if (item.magic) return [compact ? "✨완벽" : `✨ 마법으로 완벽! ${verb}`, GREEN, false];
       if (item.holds()) return [`다 쪘어요! ${verb}`, GREEN, false];
       return [compact ? verb + "!" : `지금 ${verb}!`, GREEN, true];
     }
     if (item.isOvercooked()) {
       const over = item.overLabel();
-      return [compact ? over : `${over} (팁 없음)`, ORANGE, item.burns()];
+      return [compact ? over : `${over} (완벽 아님)`, ORANGE, item.burns()];
     }
     if ((item.stepCount() > 1 || item.isBatch()) && !compact) return [`${label} · ${qname}`, WHITE, false];
     return [qname, WHITE, false];
@@ -184,7 +185,10 @@ export class StationView extends Node2D {
     }
   }
 
+  private sparkT = 0.0;
+
   draw(g: Gfx): void {
+    this.sparkT = performance.now() / 1000;
     const sz = this.size;
     const r = new R(-sz.x * 0.5, -sz.y * 0.5, sz.x, sz.y);
     this.drawBase(g, r);
@@ -201,6 +205,7 @@ export class StationView extends Node2D {
       const c = this.slotCenter(k);
       if (this.isBig()) this.drawBigItem(g, item, popS);
       else drawCookItem(g, item, c, popS * this.itemScale());
+      if (item.magic) FoodArt.magicSparkles(g, this.isBig() ? v(0, -6) : c, this.isBig() ? sz.x * 0.36 : 62.0 * this.itemScale(), this.sparkT, this.isBig() ? 8 : 5);
       const w = this.slotWidth();
       this.drawGauge(g, item, new R(c.x - w * 0.42, sz.y * 0.5 - 30.0, w * 0.84, 16.0));
       // 한 칸짜리는 이름 자리에 안내 문구를, 여러 칸짜리는 이름 아래에 칸별 문구를 쓴다

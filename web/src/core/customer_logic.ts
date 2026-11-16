@@ -1,6 +1,6 @@
 // 손님 1명의 주문·인내심·특수 행동 (순수 로직).
 
-import { CUSTOMERS, DRUNK_REVEAL_TIME, Q, burntPrice, menuPrice, tipFor } from "./defs.ts";
+import { CUSTOMERS, DRUNK_REVEAL_TIME, MAGIC_PRICE_MULT, Q, burntPrice, menuPrice, tipFor } from "./defs.ts";
 import type { Rng } from "../engine/rng.ts";
 
 export const CState = { WAITING: 0, HAPPY: 1, ANGRY: 2 } as const;
@@ -19,6 +19,7 @@ export interface ServeResult {
   done?: boolean;
   seat?: number;
   next?: boolean; // 미식가: 지금 코스를 다 받아서 다음 코스로
+  magic?: boolean; // 마법의 가루를 뿌린 요리 (값 2배)
 }
 
 export class CustomerLogic {
@@ -86,7 +87,7 @@ export class CustomerLogic {
     return "";
   }
 
-  serve(menuId: string, quality: number): ServeResult {
+  serve(menuId: string, quality: number, magic = false): ServeResult {
     if (this.state !== CState.WAITING) return { result: "reject", reason: "busy" };
     const idx = this.items.findIndex((it) => !it.served && it.menu === menuId);
     if (idx < 0) return { result: "reject", reason: "wrong" };
@@ -100,11 +101,13 @@ export class CustomerLogic {
     let tip = 0;
     if (quality === Q.PERFECT) tip = tipFor(menuId, this.tipMult);
     if (quality === Q.BURNT) price = burntPrice(menuId);
+    if (magic) price *= MAGIC_PRICE_MULT; // 마법의 가루: 감동해서 값 2배
     this.earned += price + tip;
     const done = this.unservedMenus().length === 0;
     if (done) this.state = CState.HAPPY;
     const res: ServeResult = { result: "ok", paid: price, tip, done };
     if (quality === Q.BURNT) res.reason = "burnt";
+    if (magic) res.magic = true;
     return res;
   }
 

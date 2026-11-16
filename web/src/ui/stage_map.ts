@@ -18,6 +18,7 @@ import * as G from "../art/map_geo.ts";
 import { LevelNode, MapButton, MapNote, ShopPlate, SideArrow } from "./map_widgets.ts";
 import { starRow } from "./star_row.ts";
 import { openCollection } from "./collection.ts";
+import { Tutorial, elementRect, type TutStep } from "./tutorial.ts";
 import { gourmetPortrait } from "./portrait.ts";
 import { menuIcons, menuPic } from "../shift/shift_hud.ts";
 
@@ -36,6 +37,7 @@ const ZONE_W = G.ZONE_W;
 const PLATE_SIZE = v(420, 52);
 const PLATE_MIN_Y = 128.0; // 이름표가 위쪽 제목 상자에 닿지 않게
 const UPGRADE_SIZE = v(240, 62);
+const SUPPLY_SIZE = v(200, 62); // 장보기 버튼
 const LEVEL_R = 60.0;
 const ENDLESS_R = 46.0;
 const EVENT_R = 54.0; // 미식가 이벤트 발판
@@ -68,6 +70,10 @@ export class StageMap extends Scene {
   private sliding = false;
   private scrollTween: Tween | null = null;
   private centerShopIdx = -1;
+  private upgradeBtns: Record<string, MapButton> = {};
+  private supplyBtns: Record<string, MapButton> = {};
+  private popupGo: HTMLElement | null = null; // 스테이지 창의 "영업 시작" (튜토리얼이 가리킴)
+  private tut: Tutorial | null = null;
 
   ready(): void {
     this.clearColor = rgb(0.17, 0.18, 0.23);
@@ -79,7 +85,67 @@ export class StageMap extends Scene {
     GameState.justShopCleared = "";
     if (buy !== "") this.scrollToShop(D.shopIndex(buy), false);
     else this.scrollToLevelOf(GameState.currentMapShop());
-    Sound.playBgm("title");
+    Sound.playBgm("map");
+    this.tut = this.makeTutorial();
+  }
+
+  // ---------------------------------------------------------------- 튜토리얼 (처음 하는 사람)
+
+  /** 지도 위 단추의 화면 네모 (지도 밀기 반영) */
+  private mapButtonRect(b: MapButton | undefined): R | null {
+    if (b === undefined) return null;
+    return new R(b.position.x - this.scroll, b.position.y, b.size.x, b.size.y);
+  }
+
+  private nodeRect(lv: number): R | null {
+    const n = this.nodes.find((k) => k.number === lv && !k.endless && !k.event);
+    if (n === undefined) return null;
+    const r = n.radius;
+    return new R(n.position.x - this.scroll - r - 14.0, n.position.y - r * G.K - 66.0, r * 2.0 + 28.0, r * G.K * 2.0 + 84.0);
+  }
+
+  /** 튜토리얼 단계: start = 인사 → 장보기, buy = (장보기를 다 안 하고 나옴) 장보기, upgrade = 업그레이드, stage = 스테이지 1 → 영업 시작 */
+  private makeTutorial(): Tutorial | null {
+    const step = GameState.tutorial;
+    const sid = D.SHOPS[0].id;
+    if (step === "" || !["start", "buy", "upgrade", "stage"].includes(step)) return null;
+    this.setScroll(0);
+    const steps: TutStep[] = [];
+    if (step === "start") {
+      steps.push({
+        text: `어서 와요, 새 사장님! 오늘부터 이 골목 포장마차를 맡게 됐어요. 개업 자금 ${D.formatWon(D.START_MONEY)}으로 시작해요. 이모가 하나씩 알려 줄게요!`,
+        next: "좋아요!",
+      });
+    }
+    if (step === "start" || step === "buy") {
+      steps.push({
+        text: "음식을 만들려면 먼저 재료가 있어야 해요. '장보기'를 눌러 재료를 사러 가요!",
+        target: () => this.mapButtonRect(this.supplyBtns[sid]),
+        wait: "supply",
+        done: () => GameState.setTutorial("buy"),
+      });
+    }
+    if (step === "upgrade") {
+      steps.push({
+        text: "다음은 장비예요. 장비를 키우면 더 많이, 더 빨리 만들 수 있어요. '업그레이드'를 눌러요!",
+        target: () => this.mapButtonRect(this.upgradeBtns[sid]),
+        wait: "upgrade",
+      });
+    }
+    if (step === "stage") {
+      steps.push({
+        text: "준비 끝! 이제 첫 영업이에요. 길 위의 '스테이지 1'을 눌러요.",
+        target: () => this.nodeRect(1),
+        wait: "popup",
+      });
+      steps.push({
+        text: "하루 할당량만큼 벌면 다음 스테이지가 열려요. 재료가 모자라면 여기서 바로 살 수도 있어요. '영업 시작'!",
+        target: () => (this.popupGo !== null ? elementRect(this.popupGo, this) : null),
+        wait: "start",
+        done: () => GameState.setTutorial("cook"),
+      });
+    }
+    return new Tutorial(this, steps);
   }
 
   onBack(): void {
@@ -141,12 +207,16 @@ export class StageMap extends Scene {
       const opened = GameState.shopOpened(sh.id);
       // 이름표 (+ 열린 가게는 오른쪽에 업그레이드) 는 건물 위에
       const b = z.bounds;
-      const rowW = PLATE_SIZE.x + (opened ? 14.0 + UPGRADE_SIZE.x : 0.0);
+      // 이름표 오른쪽에 업그레이드 + 장보기 (지도 왼쪽 끝 밖으로 나가지 않게)
+      const rowW = PLATE_SIZE.x + (opened ? 14.0 + UPGRADE_SIZE.x + 12.0 + SUPPLY_SIZE.x : 0.0);
       const y = Math.max(PLATE_MIN_Y, b.y - PLATE_SIZE.y - 18.0);
-      const x = b.center().x - rowW * 0.5;
+      const x = Math.max(16.0, b.center().x - rowW * 0.5);
       this.addPlate(sh, v(x, y), opened);
-      if (opened) this.addUpgradeButton(sh.id, v(x + PLATE_SIZE.x + 14.0, y - (UPGRADE_SIZE.y - PLATE_SIZE.y) * 0.5));
-      else this.addLockedNote(sh, b);
+      if (opened) {
+        const by = y - (UPGRADE_SIZE.y - PLATE_SIZE.y) * 0.5;
+        this.addUpgradeButton(sh.id, v(x + PLATE_SIZE.x + 14.0, by));
+        this.addSupplyButton(sh.id, v(x + PLATE_SIZE.x + 14.0 + UPGRADE_SIZE.x + 12.0, by));
+      } else this.addLockedNote(sh, b);
     }
     art.walkedS = GameState.storyCleared || GameState.levelCleared(D.TOTAL_LEVELS) ? L.endS : G.levelS(clamp(GameState.level, 1, D.TOTAL_LEVELS));
     if (GameState.justUnlocked > 0) GameState.justUnlocked = 0;
@@ -232,6 +302,30 @@ export class StageMap extends Scene {
     b.badge = GameState.canBuyAny(sid);
     b.onPressed = () => this.goUpgrade(sid);
     this.addButton(b);
+    this.upgradeBtns[sid] = b;
+  }
+
+  /** 장보기 (재료가 떨어진 메뉴가 있으면 "!") */
+  private addSupplyButton(sid: string, pos: V): void {
+    const b = new MapButton();
+    b.text = "장보기";
+    b.icon = "basket";
+    b.color = Ui.ACCENT;
+    b.fontSize = 28;
+    b.size = SUPPLY_SIZE;
+    b.position = pos;
+    const lv = Math.min(Math.max(GameState.level, D.shopDef(sid).first_level), D.shopDef(sid).last_level);
+    b.badge = Object.keys(GameState.stockShortage(lv)).length > 0;
+    b.onPressed = () => this.goSupply(sid);
+    this.addButton(b);
+    this.supplyBtns[sid] = b;
+  }
+
+  private goSupply(sid: string): void {
+    if (this.busy()) return;
+    this.tut?.onEvent("supply");
+    GameState.mapShop = sid;
+    this.game.goto("supply");
   }
 
   /** 아직 안 연 가게: 앞 가게를 다 깼으면 "가게 열기 · 값" 버튼 (돈이 모자라면 흐리게 + 얼마 더 필요한지), 아니면 언제 살 수 있는지 */
@@ -423,6 +517,7 @@ export class StageMap extends Scene {
   }
 
   process(dt: number): void {
+    this.tut?.update();
     if (this.dragging || Math.abs(this.vel) < 8.0) return;
     const before = this.scroll;
     this.setScroll(this.scroll + this.vel * dt);
@@ -461,6 +556,9 @@ export class StageMap extends Scene {
     Ui.place(book, 234, 16, 250, 72);
     Ui.onPress(book, () => this.openBook());
     this.ui.appendChild(book);
+    const snd = Ui.soundToggle(72);
+    Ui.place(snd, 500, 16, 72, 72);
+    this.ui.appendChild(snd);
 
     // 가운데: 가게 간판 (나무 판 + 가게 이름 큰 글자 + 스테이지 범위)
     const bar = Ui.chip(30);
@@ -617,6 +715,7 @@ export class StageMap extends Scene {
       col.appendChild(pic.el);
     }
     if (GameState.levelCleared(lv)) col.appendChild(Ui.label("이미 깬 스테이지예요. 다시 하면 별을 더 받을 수 있어요.", 25, Ui.MUTED, "center", true));
+    col.appendChild(this.stockBox(lv));
     col.appendChild(Ui.spacer(4));
     const row = Ui.hbox(20);
     col.appendChild(row);
@@ -630,6 +729,41 @@ export class StageMap extends Scene {
     go.style.flex = "1 1 auto";
     Ui.onPress(go, () => this.startLevel(lv));
     row.appendChild(go);
+    this.popupGo = go;
+    this.tut?.onEvent("popup");
+  }
+
+  /**
+   * 스테이지 창의 재료 칸: 오늘 쓸 메뉴마다 남은 재료, 모자라면 "모자란 재료 사기" 버튼
+   * (돈이 모자라면 외상 — 지갑이 잠깐 마이너스, 오늘 정산에서 갚음. 진행이 막히지 않게)
+   */
+  private stockBox(lv: number): HTMLDivElement {
+    const sid = D.shopForLevel(lv).id;
+    const box = Ui.inset(12);
+    box.classList.add("vbox");
+    box.style.gap = "8px";
+    const need = D.stockNeed(lv);
+    const parts: string[] = [];
+    for (const m of D.unlockedMenus(lv)) parts.push(`${D.menuName(m)} ${GameState.stockOf(sid, m)}/${need[m] ?? 0}`);
+    const short = GameState.stockShortage(lv);
+    const ok = Object.keys(short).length === 0;
+    box.appendChild(Ui.label(`재료 (남은 / 하루 어림)  ${parts.join(" · ")}`, 25, ok ? Ui.INK : rgb(0.75, 0.3, 0.1), "center", true));
+    if (ok) {
+      box.appendChild(Ui.label("재료 충분해요!", 26, Ui.GOOD));
+      return box;
+    }
+    const cost = GameState.shortageCost(lv);
+    const credit = GameState.wallet < cost;
+    const b = Ui.button("", credit ? Ui.SECONDARY : Ui.GOOD, 30, 88);
+    Ui.withIcon(b, Ui.ICON.coin, credit ? `모자란 재료 외상으로 사기 · ${D.formatWon(cost)}` : `모자란 재료 사기 · ${D.formatWon(cost)}`);
+    Ui.onPress(b, () => {
+      GameState.buyShortage(lv);
+      Sound.playSfx("coin");
+      this.openLevelPopup(lv);
+    });
+    box.appendChild(b);
+    if (credit) box.appendChild(Ui.label("돈이 모자라면 외상으로 사고 오늘 정산에서 갚아요", 23, Ui.MUTED, "center", true));
+    return box;
   }
 
   /** 가운데 팝업 창 (위에 리본 제목) → 내용을 넣을 세로 상자 */
@@ -656,6 +790,7 @@ export class StageMap extends Scene {
   }
 
   private startLevel(lv: number): void {
+    this.tut?.onEvent("start");
     GameState.chooseLevel(lv);
     this.game.goto("shift");
   }
@@ -757,6 +892,7 @@ export class StageMap extends Scene {
 
   private goUpgrade(sid: string): void {
     if (this.busy()) return;
+    this.tut?.onEvent("upgrade");
     GameState.mapShop = sid;
     this.game.goto("upgrade");
   }

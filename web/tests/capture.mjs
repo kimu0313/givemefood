@@ -44,9 +44,22 @@ async function step(n, dt = 1 / 60) {
   );
 }
 
-async function open(scene, setup = "") {
+/** 장면 하나 열기. 튜토리얼은 끈 상태로 (튜토리얼은 flow 장면에서 따로 확인), 재료는 열린 메뉴마다 넉넉히 */
+async function open(scene, setup = "", tutorial = false) {
   await page.goto(`${base}?nosave=1&scene=${scene}`);
   await page.waitForFunction(() => window.__game && window.__game.scene !== null);
+  if (!tutorial) {
+    await page.evaluate((scene) => {
+      const st = window.__state;
+      st.tutorial = "";
+      st.stock = {};
+      for (const sid of ["pocha", "bunsik", "market", "beach", "suljip"]) {
+        st.stock[sid] = {};
+        for (const m of Object.keys(st.stockFor(sid))) st.stock[sid][m] = 30;
+      }
+      window.__game.goto(scene);
+    }, scene);
+  }
   if (setup) {
     await page.evaluate(setup);
     await page.waitForTimeout(50);
@@ -93,6 +106,7 @@ const shots = {
     await page.evaluate(() => {
       const sc = window.__game.scene;
       sc.onStart();
+      sc.openShop();
       const s = sc.session;
       for (const m of ["tteokbokki", "sundae", "odeng", "odeng", "odeng", "twigim", "twigim"]) s.addIngredient(m);
     });
@@ -111,6 +125,7 @@ const shots = {
     await page.evaluate(() => {
       const sc = window.__game.scene;
       sc.onStart();
+      sc.openShop();
     });
     await step(200, 1 / 30);
     await page.evaluate(() => {
@@ -190,6 +205,7 @@ const shots = {
     await page.evaluate(() => {
       const sc = window.__game.scene;
       sc.onStart();
+      sc.openShop();
       for (let i = 0; i < 150; i++) window.__game.frame(1 / 60);
       const s = sc.session;
       const m = s.gourmet.unservedMenus()[0];
@@ -204,6 +220,58 @@ const shots = {
     await page.waitForTimeout(400);
     await shot("event_settlement");
   },
+  /** 단골이 완벽한 요리를 받고 팁을 주며 한마디 (팁은 단골만) */
+  async tip() {
+    await open("title", "Object.assign(window.__state, {level: 3, playLevel: 3, mode: 'story'}); window.__game.goto('shift')");
+    await page.evaluate(() => {
+      const sc = window.__game.scene;
+      sc.onStart();
+      sc.openShop();
+      const s = sc.session;
+      for (let i = 0; i < 400 && s.seatedCount() === 0; i++) window.__game.frame(1 / 60);
+      const C = s.seats.find((c) => c !== null).constructor;
+      const seat = s.seats.findIndex((c) => c === null);
+      const reg = new C("regular", ["tteokbokki", "sundae"]);
+      reg.regularId = "grandma";
+      s.debugSeatCustomer(seat, reg);
+      for (let i = 0; i < 40; i++) window.__game.frame(1 / 60);
+      const slot = s.freeTraySlot("tteokbokki");
+      s.tray[slot] = { menu: "tteokbokki", quality: 2 };
+      s.serve(slot, seat);
+      for (let i = 0; i < 20; i++) window.__game.frame(1 / 60);
+    });
+    await page.waitForTimeout(200);
+    await shot("tip");
+  },
+  /** 장보기 (마법의 가루 카드) · 팻말 · 가루 준비 + 가루 뿌린 판 · 품절 재료통을 눌렀을 때 사기 창 */
+  async magic() {
+    await open("title", "Object.assign(window.__state, {level: 4, wallet: 64000, powder: 2, mapShop: 'pocha'}); window.__state.stock.pocha.twigim = 0; window.__game.goto('supply')");
+    await page.waitForTimeout(300);
+    await shot("supply_magic");
+    await open("title", "Object.assign(window.__state, {level: 4, playLevel: 4, mode: 'story', powder: 2}); window.__state.stock.pocha.twigim = 0; window.__game.goto('shift')");
+    await page.evaluate(() => window.__game.scene.onStart());
+    await step(30);
+    await shot("sign_closed");
+    await page.evaluate(() => {
+      const sc = window.__game.scene;
+      sc.openShop();
+      sc.session.armPowder();
+      sc.session.addIngredient("tteokbokki");
+      sc.session.armPowder();
+      for (let i = 0; i < 200; i++) window.__game.frame(1 / 60);
+    });
+    await page.waitForTimeout(200);
+    await shot("magic_armed");
+    await page.evaluate(() => {
+      const sc = window.__game.scene;
+      const bin = sc.kitchen.binMenus().indexOf("twigim");
+      const c = sc.kitchen.binCenter(bin);
+      sc.pending = { kind: "bin", menu: "twigim" };
+      sc.tap();
+    });
+    await page.waitForTimeout(300);
+    await shot("buy_in_shift");
+  },
   async quit() {
     await open("title");
     await page.getByText("게임 종료").click();
@@ -212,7 +280,7 @@ const shots = {
   },
   async pause() {
     await open("title", "Object.assign(window.__state, {level: 2, playLevel: 2, mode: 'story'}); window.__game.goto('shift')");
-    await page.evaluate(() => window.__game.scene.onStart());
+    await page.evaluate(() => { window.__game.scene.onStart(); window.__game.scene.openShop(); });
     await step(30);
     await page.locator('button[aria-label="일시정지"]').click();
     await page.waitForTimeout(400);
@@ -239,7 +307,28 @@ async function clickDesign(x, y) {
   await page.waitForTimeout(60);
 }
 
-/** 사람처럼 눌러 보는 흐름: 타이틀 → 지도 → 스테이지 1 → 떡볶이 끓여 덜어서 서빙 → 일시정지 → 다시 → 끝까지 → 정산 → 지도 */
+/** HTML 요소 가운데를 진짜 마우스로 누름 (튜토리얼 덮개 구멍을 지나가는지도 같이 확인) */
+async function clickEl(fnSrc) {
+  const r = await page.evaluate(fnSrc);
+  await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2);
+  await page.waitForTimeout(80);
+}
+
+/** 지도 위 캔버스 단추 가운데 (설계 좌표) */
+async function mapButtonCenter(kind) {
+  return await page.evaluate((kind) => {
+    const sc = window.__game.scene;
+    const b = (kind === "supply" ? sc.supplyBtns : sc.upgradeBtns).pocha;
+    return { x: b.position.x + b.size.x / 2 - sc.scrollX(), y: b.position.y + b.size.y / 2 };
+  }, kind);
+}
+
+const sceneName = () => page.evaluate(() => window.__game.scene.constructor.name);
+
+/**
+ * 사람처럼 눌러 보는 흐름 (새 게임 = 튜토리얼 그대로): 타이틀 → 지도(인사 → 장보기) → 떡볶이 10인분 → 지도 → 업그레이드 → 판 키우기
+ * → 지도 → 스테이지 1 → 영업 시작 → 재료통 → 판 → 그릇 → 일시정지 → 다시 → 끝까지 → 정산 → 지도
+ */
 shots.flow = async () => {
   const fails = [];
   const check = (cond, msg) => {
@@ -253,33 +342,83 @@ shots.flow = async () => {
   await page.waitForFunction(() => window.__game.scene.constructor.name === "StageMap");
   check(true, "타이틀 → 지도");
   await step(5);
+  check(await page.getByText("어서 와요, 새 사장님!", { exact: false }).isVisible(), "튜토리얼: 이모 인사");
+  await shot("tut_1_hello");
+  await page.getByText("좋아요!").click();
+  await step(2);
+  // 덮개 밖(스테이지 1)은 안 눌림
   const n1 = await page.evaluate(() => {
     const sc = window.__game.scene;
     const n = sc.levelNodes().find((k) => k.number === 1 && !k.endless && !k.event);
     return { x: n.position.x - sc.scrollX(), y: n.position.y };
   });
   await clickDesign(n1.x, n1.y - 20);
+  check(!(await page.getByText("영업 시작", { exact: true }).isVisible()), "튜토리얼 중엔 가리킨 곳 말고는 안 눌림");
+  await shot("tut_2_supply_button");
+  const sb = await mapButtonCenter("supply");
+  await clickDesign(sb.x, sb.y);
+  await page.waitForFunction(() => window.__game.scene.constructor.name === "SupplyScene");
+  check(true, "장보기 → 장보기 화면");
+  await page.waitForTimeout(200);
+  await shot("tut_3_supply");
+  for (let k = 0; k < 2; k++) await clickEl(() => window.__game.scene.buyButtons.tteokbokki.getBoundingClientRect().toJSON());
+  check(await page.evaluate(() => window.__state.stockOf("pocha", "tteokbokki") === 10 && window.__state.wallet === 20000 - 7500), "떡볶이 재료 5인분 × 2 = 10인분 (7,500원)");
+  await page.waitForTimeout(150);
+  await shot("tut_4_supply_back");
+  await clickEl(() => window.__game.scene.backButton().getBoundingClientRect().toJSON());
+  await page.waitForFunction(() => window.__game.scene.constructor.name === "StageMap");
+  await step(5);
+  await shot("tut_5_upgrade_button");
+  const ub = await mapButtonCenter("upgrade");
+  await clickDesign(ub.x, ub.y);
+  await page.waitForFunction(() => window.__game.scene.constructor.name === "UpgradeScene");
+  await page.waitForTimeout(200);
+  await shot("tut_6_upgrade");
+  await clickEl(() => window.__game.scene.buyBtns.burners.getBoundingClientRect().toJSON());
+  check(await page.evaluate(() => window.__state.upgradeLevel("burners", "pocha") === 1), "튜토리얼: 떡볶이 판 키우기를 삼");
+  await clickEl(() => window.__game.scene.backBtn.getBoundingClientRect().toJSON());
+  await page.waitForFunction(() => window.__game.scene.constructor.name === "StageMap");
+  await step(5);
+  await shot("tut_7_stage");
+  await clickDesign(n1.x, n1.y - 20);
   check(await page.getByText("영업 시작", { exact: true }).isVisible(), "스테이지 1 누르면 안내 창");
+  await page.waitForTimeout(150);
+  await shot("tut_8_popup");
   await page.getByText("영업 시작", { exact: true }).click();
   await page.waitForFunction(() => window.__game.scene.constructor.name === "ShiftView");
+  check(await page.evaluate(() => window.__state.tutorial === "cook"), "튜토리얼 단계 저장 (cook)");
   await page.getByText("영업 시작!").click();
   await step(2);
   check(await page.evaluate(() => window.__game.scene.phase === 1), "영업 시작 → 진행 중");
+  await step(120);
+  check(await page.evaluate(() => window.__game.scene.session.spawned === 0), "'준비 중' 팻말이면 손님이 안 옴");
+  await shot("tut_8b_sign");
+  await clickEl(() => window.__game.scene.hud.signElement().getBoundingClientRect().toJSON());
+  check(await page.evaluate(() => window.__game.scene.session.opened), "팻말을 누르면 '영업 중' → 문 열림");
+  await step(120);
+  await shot("tut_9_bin");
   const L = await page.evaluate(() => {
     const sc = window.__game.scene;
     const pan = sc.stationViews.find((s) => s.station === "pan");
-    const p = pan.toGlobal({ x: 0, y: -6, add: undefined });
     return { bin: sc.kitchen.binCenter(0), pan: { x: pan.position.x, y: pan.position.y }, tray: sc.kitchen.trayCenter(0) };
   });
   await clickDesign(L.bin.x, L.bin.y);
-  check(await page.evaluate(() => window.__game.scene.session.stationItem("pan", 0) !== null), "떡볶이 재료 탭 → 판에 올라감");
+  check(await page.evaluate(() => window.__game.scene.session.stationItem("pan", 0) !== null && window.__game.scene.session.stockLeft("tteokbokki") === 5), "떡볶이 재료 탭 → 판에 올라감 (판 5그릇 = 재료 5인분)");
+  await step(30);
+  await shot("tut_10_pan");
   await step(8.2 * 60);
+  check(await page.evaluate(() => window.__game.scene.session.seats.some((c) => c && c.patience >= c.patienceMax - 0.01)), "설명하는 동안 손님 인내심이 안 줄어듦");
   await clickDesign(L.pan.x, L.pan.y);
   check(await page.evaluate(() => window.__game.scene.session.tray[0] !== null), "판 탭 → 완성 칸에 한 그릇");
+  await step(10);
+  await shot("tut_11_tray");
   const waiting = await page.evaluate(() => window.__game.scene.session.seats.some((c) => c && c.unservedMenus().includes("tteokbokki")));
   await clickDesign(L.tray.x, L.tray.y - 14);
   await step(10);
   if (waiting) check(await page.evaluate(() => window.__game.scene.session.sales > 0), "그릇 탭 → 손님에게 자동 서빙, 매출이 오름");
+  await shot("tut_12_done");
+  await page.getByText("영업 계속!").click();
+  check(await page.evaluate(() => window.__state.tutorial === "" && !window.__game.scene.session.frozen), "튜토리얼 끝 → 손님 인내심 다시 흐름");
   await page.locator("button[aria-label=\"일시정지\"]").click();
   check(await page.evaluate(() => window.__game.paused), "일시정지");
   await page.getByText("계속 영업하기").click();
@@ -336,6 +475,7 @@ shots.perf = async () => {
       const sc = window.__game.scene;
       if (sc.session) {
         sc.onStart();
+      sc.openShop();
         for (const m of sc.session.menuPool) for (let k = 0; k < 2; k++) sc.session.addIngredient(m);
       }
     });
@@ -356,6 +496,7 @@ for (const [shop, lv] of [["bunsik", 12], ["market", 19], ["beach", 26], ["sulji
     await page.evaluate(() => {
       const sc = window.__game.scene;
       sc.onStart();
+      sc.openShop();
       const s = sc.session;
       for (const m of s.menuPool) for (let k = 0; k < 2; k++) s.addIngredient(m);
     });

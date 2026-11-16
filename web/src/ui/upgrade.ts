@@ -11,6 +11,7 @@ import * as Ui from "../engine/ui.ts";
 import * as D from "../core/defs.ts";
 import { GameState } from "../state/game_state.ts";
 import { StreetArt } from "../art/street_art.ts";
+import { Tutorial, elementRect, type TutStep } from "./tutorial.ts";
 
 /** 업그레이드 항목 아이콘 (먹선 테두리 그림) */
 const UPGRADE_ICON: Record<string, string> = {
@@ -33,6 +34,9 @@ export class UpgradeScene extends Scene {
   private walletLabel!: HTMLDivElement;
   private shopId = "";
   private cards!: HTMLDivElement;
+  private backBtn!: HTMLElement;
+  private buyBtns: Record<string, HTMLElement> = {};
+  private tut: Tutorial | null = null;
 
   ready(): void {
     this.clearColor = rgb(0.13, 0.09, 0.08);
@@ -83,14 +87,48 @@ export class UpgradeScene extends Scene {
     const back = Ui.button("", Ui.SECONDARY, 40, 108);
     Ui.withIcon(back, Ui.ICON.back, "지도로 돌아가기");
     back.style.width = "560px";
-    Ui.onPress(back, () => this.game.goto("map"));
+    Ui.onPress(back, () => this.goBack());
     bottom.appendChild(back);
+    this.backBtn = back;
     this.refresh();
-    Sound.playBgm("settlement");
+    Sound.playBgm("map");
+    this.tut = this.makeTutorial();
+  }
+
+  process(_dt: number): void {
+    this.tut?.update();
   }
 
   onBack(): void {
+    if (this.tut?.active()) return;
+    this.goBack();
+  }
+
+  private goBack(): void {
+    this.tut?.onEvent("back");
     this.game.goto("map");
+  }
+
+  /** 튜토리얼 "upgrade": 첫 장비(떡볶이 판 키우기)를 사 보고 → 지도로 (돈이 모자라면 설명만) */
+  private makeTutorial(): Tutorial | null {
+    if (GameState.tutorial !== "upgrade") return null;
+    const id = D.UPGRADE_ORDER[0];
+    const nxt = GameState.nextUpgrade(id, this.shopId);
+    const steps: TutStep[] = [];
+    if (nxt !== null && GameState.wallet >= nxt.cost) {
+      steps.push({
+        text: `'${D.upgradeName(id, this.shopId)}'를 사 볼까요? ${nxt.desc}! 한 번에 더 많이 만들 수 있어요.`,
+        target: () => elementRect(this.buyBtns[id], this),
+        wait: "bought",
+      });
+    }
+    steps.push({
+      text: "장비는 가게마다 따로 사요. 돈을 모아서 화력과 손님 편의시설도 키워 보세요. 이제 첫 영업을 하러 가요!",
+      target: () => elementRect(this.backBtn, this),
+      wait: "back",
+      done: () => GameState.setTutorial("stage"),
+    });
+    return new Tutorial(this, steps);
   }
 
   private refresh(): void {
@@ -140,12 +178,14 @@ export class UpgradeScene extends Scene {
       btn.disabled = GameState.wallet < cost;
       Ui.onPress(btn, () => {
         if (GameState.buyUpgrade(id, this.shopId)) {
-          Sound.playSfx("coin");
+          Sound.playSfx("upgrade");
           this.refresh();
+          this.tut?.onEvent("bought");
         }
       });
     }
     vb.appendChild(btn);
+    this.buyBtns[id] = btn;
     return card;
   }
 

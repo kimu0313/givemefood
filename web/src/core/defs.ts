@@ -211,7 +211,7 @@ export const MENUS: Record<string, MenuDef> = {
   tteokbokki: {
     name: "떡볶이", label: "떡볶이", price: 3000, station: "pan",
     raw_color: rgb(0.97, 0.62, 0.52), cooked_color: rgb(0.86, 0.16, 0.1),
-    tip: "재료를 탭하면 큰 떡볶이 판에 여러 그릇을 한 번에 끓여요. 7초부터 초록 구간 — 판을 탭할 때마다 한 그릇씩 덜어요. 오래 두면 졸아서 팁이 없어요(타지는 않아요).",
+    tip: "재료를 탭하면 큰 떡볶이 판에 여러 그릇을 한 번에 끓여요. 7초부터 초록 구간 — 판을 탭할 때마다 한 그릇씩 덜어요. 오래 두면 졸아서 '완벽'이 아니게 돼요(타지는 않아요).",
     steps: [
       { kind: "cook", label: "끓이는 중", ripe: 5.0, perfect_start: 7.0, perfect_end: 16.0, burns: false, over_label: "졸음", tap: "take_out", tap_label: "덜기" },
     ],
@@ -228,7 +228,7 @@ export const MENUS: Record<string, MenuDef> = {
   odeng: {
     name: "어묵", label: "어묵", price: 1500, station: "broth",
     raw_color: rgb(0.95, 0.89, 0.74), cooked_color: rgb(0.83, 0.61, 0.34),
-    tip: "어묵 사각틀 4칸에 꼬치를 넣고 4초면 완성. 10초가 지나면 불어서 팁이 없어요.",
+    tip: "어묵 사각틀 4칸에 꼬치를 넣고 4초면 완성. 10초가 지나면 불어서 '완벽'이 아니에요.",
     steps: [
       { kind: "cook", label: "국물", ripe: 4.0, perfect_start: 4.0, perfect_end: 10.0, burns: false, tap: "take_out" },
     ],
@@ -401,28 +401,30 @@ export interface CustomerDef {
 
 export const CUSTOMERS: Record<string, CustomerDef> = {
   // 인내심 (2026-11-12 한 번 1.5배로 늘렸다가 사용자 요청으로 원래대로: 20/10/30/15/25)
+  // 팁은 단골만 준다 (2026-11-16 사용자 "단골손님만 팁 주고 일반 손님들은 팁 안주는걸로", 팁 줄 때 한마디 = REACTION_LINES.tip).
+  // 이벤트 미식가는 따로 (보스 손님, 팁 3배)
   normal: {
-    name: "손님", patience: 20.0, tip_mult: 1.0, unlock_level: 1, weight: 50.0, max_items: 2,
+    name: "손님", patience: 20.0, tip_mult: 0.0, unlock_level: 1, weight: 50.0, max_items: 2,
     body: rgb(0.33, 0.45, 0.62), hair: rgb(0.15, 0.12, 0.1),
     desc: "인내심 20초",
   },
   hurry: {
-    name: "급한 손님", patience: 10.0, tip_mult: 1.5, unlock_level: 1, weight: 22.0, max_items: 1,
+    name: "급한 손님", patience: 10.0, tip_mult: 0.0, unlock_level: 1, weight: 22.0, max_items: 1,
     body: rgb(0.92, 0.56, 0.2), hair: rgb(0.25, 0.16, 0.1),
-    desc: "인내심 10초 · 팁 1.5배 · 메뉴는 항상 1개",
+    desc: "인내심 10초 · 메뉴는 항상 1개",
   },
   regular: {
     name: "단골", patience: 30.0, tip_mult: 2.0, unlock_level: 2, weight: 16.0, max_items: 2,
     body: rgb(0.3, 0.56, 0.4), hair: rgb(0.36, 0.36, 0.4),
-    desc: "인내심 30초 · 팁 2배 · 서빙하면 단골 도감에 기록",
+    desc: "인내심 30초 · 단골만 팁을 줘요 (완벽한 요리에 값의 60%) · 서빙하면 단골 도감에 기록",
   },
   jinsang: {
-    name: "진상", patience: 15.0, tip_mult: 1.0, unlock_level: 4, weight: 13.0, max_items: 2,
+    name: "진상", patience: 15.0, tip_mult: 0.0, unlock_level: 4, weight: 13.0, max_items: 2,
     body: rgb(0.5, 0.3, 0.56), hair: rgb(0.08, 0.08, 0.1),
     desc: "인내심 15초 · 조리 중에 주문을 한 번 바꿔요",
   },
   drunk: {
-    name: "취객", patience: 25.0, tip_mult: 1.0, unlock_level: 5, weight: 13.0, max_items: 2,
+    name: "취객", patience: 25.0, tip_mult: 0.0, unlock_level: 5, weight: 13.0, max_items: 2,
     body: rgb(0.58, 0.26, 0.26), hair: rgb(0.2, 0.15, 0.12),
     desc: "인내심 25초 · 주문이 흐릿해요. 탭하면 다시 말해요",
   },
@@ -447,17 +449,18 @@ export const LEVEL_INTERVALS = [15.0, 13.5, 12.0, 11.0, 10.0, 9.5, 9.0];
 
 // 하루 할당량 = 그날 채워야 하는 매출 (스테이지 1~35). 날이 갈수록 커진다 (앞 스테이지보다 항상 큼).
 // 봇(완벽만 노림)이 그날 손님을 다 받았을 때 매출의 약 40~70% (봇의 가장 낮은 매출보다도 낮게).
+// 2026-11-16 팁을 단골만 주게 바꾸면서 봇 매출이 약 19% 줄어 스테이지마다 같은 비율로 낮춤 (봇 매출 / 할당량 비는 그대로).
 export const LEVEL_TARGETS = [
   // 골목 포장마차 (스테이지 1~7)
-  13000, 14500, 15500, 16500, 18000, 19500, 21000,
+  9500, 12000, 12500, 13500, 14500, 15500, 17000,
   // 동네 분식집 (8~14)
-  24000, 26000, 30000, 34000, 38000, 41000, 44000,
+  19000, 20000, 24500, 27500, 31000, 33000, 35500,
   // 야시장 푸드트럭 (15~21)
-  45000, 46000, 47000, 48000, 49000, 50000, 52000,
+  36500, 37500, 38500, 39500, 40000, 41000, 42500,
   // 해변 포장마차 (22~28)
-  100000, 110000, 118000, 126000, 134000, 142000, 150000,
+  80500, 88500, 95500, 103000, 110000, 116500, 122500,
   // 실내 포차 (29~35)
-  170000, 180000, 190000, 200000, 210000, 220000, 230000,
+  136000, 144000, 154000, 161000, 169500, 177500, 185500,
 ];
 
 export const UPGRADE_ORDER = ["burners", "heat", "stove"];
@@ -495,16 +498,72 @@ export interface RegularDef {
   id: string;
   name: string;
   lines: string[];
+  shop: string; // 이 가게에서 처음 단골이 됨 (그 가게부터 찾아오고, 뒤 가게로도 따라옴)
 }
 
-// 단골은 가게를 옮겨도 따라온다
+// 단골 6명 (2026-11-16 사용자: "단골 6명, 젊은 여자도 추가. 첫 번째 가게에 1명, 두 번째에 2명, 세 번째에 3명 확보,
+// 네 번째·다섯 번째 가게엔 왔던 단골들이 오는 식"). 순서 = 처음 만나는 순서 (도감 순서).
+// 그 가게에서 새로 만나는 단골은 2배 자주 온다 (REGULAR_NEW_WEIGHT).
 export const REGULARS: RegularDef[] = [
-  { id: "taxi", name: "택시 기사 박씨", lines: ["오늘도 고생했어요.", "비 오는 날엔 역시 여기지.", "한 바퀴 돌고 또 올게요."] },
-  { id: "office", name: "야근하는 김 대리", lines: ["오늘도 야근이에요…", "여기 오면 좀 살 것 같아요.", "사장님 덕에 버팁니다."] },
-  { id: "grandma", name: "동네 할머니", lines: ["아이고, 비 맞지 말고 장사해.", "우리 손주도 이거 좋아해.", "많이 팔어, 응?"] },
-  { id: "student", name: "시험 끝난 대학생", lines: ["시험 끝났어요!", "여기가 제일 맛있어요.", "다음엔 친구들도 데려올게요."] },
-  { id: "guard", name: "경비 아저씨", lines: ["순찰 돌다 왔소.", "따뜻한 국물이 최고지.", "오늘 밤도 무사히."] },
+  { id: "taxi", name: "택시 기사 박씨", shop: "pocha", lines: ["오늘도 고생했어요.", "비 오는 날엔 역시 여기지.", "한 바퀴 돌고 또 올게요."] },
+  { id: "student", name: "시험 끝난 대학생", shop: "bunsik", lines: ["시험 끝났어요!", "여기가 제일 맛있어요.", "다음엔 친구들도 데려올게요."] },
+  { id: "cafe", name: "카페 알바생 수아", shop: "bunsik", lines: ["사장님, 저 왔어요~", "알바 끝나고 바로 왔어요!", "오늘도 여기서 힐링해요."] },
+  { id: "office", name: "야근하는 김 대리", shop: "market", lines: ["오늘도 야근이에요…", "여기 오면 좀 살 것 같아요.", "사장님 덕에 버팁니다."] },
+  { id: "grandma", name: "동네 할머니", shop: "market", lines: ["아이고, 장사는 잘 되고?", "우리 손주도 이거 좋아해.", "많이 팔어, 응?"] },
+  { id: "guard", name: "경비 아저씨", shop: "market", lines: ["순찰 돌다 왔소.", "따뜻한 국물이 최고지.", "오늘 밤도 무사히."] },
 ];
+export const REGULAR_NEW_WEIGHT = 2.0;
+
+/** 이 가게에 찾아오는 단골 (그 가게까지 만난 단골 전부) */
+export function regularsFor(shopId: string): RegularDef[] {
+  const i = shopIndex(shopId);
+  return REGULARS.filter((r) => shopIndex(r.shop) <= i);
+}
+
+/** 이 가게에서 새로 만나는 단골 */
+export function regularsNewAt(shopId: string): RegularDef[] {
+  return REGULARS.filter((r) => r.shop === shopId);
+}
+
+// ---------------------------------------------------------------- 재료 (2026-11-16 사용자 "가게 재료도 사고")
+// 메뉴마다 재료를 인분 단위로 사서 쌓아 둔다 (가게마다 따로, 남은 재료는 다음 날로). 재료통을 탭하면 그만큼 줄고
+// (큰 판·솥은 한 판 = 그릇 수만큼), 다 떨어진 메뉴는 손님이 주문하지 않는다 (품절).
+// 재료값은 미리 내므로 버린 음식은 그 재료를 잃는 것으로 끝 (재료가 무한인 테스트·봇에서만 폐기 손실을 돈으로 뺀다).
+export const INGREDIENT_RATE = 0.25; // 1인분 재료값 = 메뉴 값의 25% (50원 단위)
+export const STOCK_PACK = 5; // 장보기에서 한 번에 사는 양 (인분)
+export const STOCK_MAX = 40; // 메뉴마다 쌓아 둘 수 있는 최대 (인분)
+export const START_MONEY = 20000; // 처음 시작할 때 개업 자금
+export const NEW_SHOP_STOCK = 10;
+// 마법의 가루 (2026-11-16 사용자 "재료 사는 곳에 마법의 가루, 10000원, 음식 넣을 때 사용, 효과는 임의로"):
+// 가루 통을 탭해 준비 → 다음에 올리는 음식에 뿌림 (큰 판·솥은 한 판 전체). 뿌린 음식은 MAGIC_SPEED 배 빨리 익고,
+// 완벽해지면 끝까지 완벽 (타거나 불지 않음), 손님이 감동해서 값을 MAGIC_PRICE_MULT 배로 낸다. 가루는 모든 가게에서 같이 씀.
+export const POWDER_PRICE = 10000;
+export const POWDER_MAX = 9;
+export const MAGIC_SPEED = 2.5;
+export const MAGIC_PRICE_MULT = 2; // 새 가게를 열면 첫 메뉴 재료를 이만큼 선물 (돈을 다 써서 가게를 사도 막히지 않게)
+
+/** 1인분 재료값 */
+export function ingredientCost(menuId: string): number {
+  return Math.max(50, Math.round((menuPrice(menuId) * INGREDIENT_RATE) / 50) * 50);
+}
+
+/**
+ * 그 스테이지 하루에 필요한 재료 어림 (메뉴 → 인분): 손님 수 × 평균 주문 수 × 메뉴 비율 (새 메뉴 2배) × 1.3 여유.
+ */
+export function stockNeed(level: number): Record<string, number> {
+  const menus = unlockedMenus(level);
+  const news = menusUnlockedOn(level);
+  const cfg = levelConfig(level);
+  let total = 0;
+  for (const m of menus) total += news.includes(m) ? NEW_MENU_WEIGHT : 1.0;
+  const dishes = cfg.customers * (1.0 + SECOND_ITEM_CHANCE * 0.75);
+  const out: Record<string, number> = {};
+  for (const m of menus) {
+    const share = (news.includes(m) ? NEW_MENU_WEIGHT : 1.0) / total;
+    out[m] = Math.min(STOCK_MAX, Math.ceil(dishes * share * 1.3) + 1);
+  }
+  return out;
+}
 
 // 손님 반응 대사 (말풍선). 상황 → 손님 종류(단골은 "regular:<단골 id>" 가 먼저) → 대사들 (없으면 normal). "\n" = 줄바꿈 (한 줄 11자 안팎)
 //   raw   = 덜 익은 음식을 받아 먹어 봄 → 표정 yuck, 화내며 떠남 (돈 없음)
@@ -542,6 +601,25 @@ export const REACTION_LINES: Record<string, Record<string, string[]>> = {
     jinsang: ["주문도 제대로\n못 받아요?", "내가 언제\n이걸 시켰어요?"],
     drunk: ["이거… 내가\n시켰나…? 딸꾹", "음~ 이건\n내 거 아닌 듯~"],
   },
+  // 단골이 완벽한 요리를 받고 팁을 줄 때 한마디: 단골인 게 티 나는 말만, 팁·돈 얘기는 직접 하지 않음
+  // (2026-11-16 사용자 "팁을 준다는 말은 직접적으로 안 했으면, 단골이라는 티만 나게")
+  tip: {
+    regular: ["역시 늘 먹던\n그 맛이에요!", "이 집 아니면\n안 된다니까요.", "오늘도 단골집\n오길 잘했다!"],
+    "regular:taxi": ["역시 이 맛이지!\n또 올게요.", "기사 생활 십 년,\n여기만 한 데 없어.", "손님 내려 주고\n바로 달려왔지!"],
+    "regular:office": ["이 맛에\n야근 버텨요…", "사장님 요리가\n제 비타민이에요.", "오늘도 여기서\n충전하고 가요!"],
+    "regular:grandma": ["아이고 맛나다~\n역시 여기여.", "우리 단골집이\n최고여, 응?", "할미는 여기 아니면\n안 와~"],
+    "regular:student": ["역시 단골집은\n못 바꿔요!", "친구들한테\n또 자랑해야지!", "시험 끝나면\n무조건 여기죠!"],
+    "regular:cafe": ["역시 여기 오길\n잘했다~", "이 맛 때문에\n또 와요!", "친구들한텐 비밀인\n저만의 맛집이에요!"],
+    "regular:guard": ["순찰 끝엔\n역시 여기요.", "늘 먹던 맛이\n제일이오.", "오늘 밤도\n든든하구먼!"],
+  },
+  // 마법의 가루를 뿌린 요리를 받았을 때 (감동, 값 2배)
+  magic: {
+    normal: ["우와!! 이게 무슨\n맛이에요?!", "입에서 별이\n터지는 맛!", "이건… 마법이야!"],
+    regular: ["사장님, 오늘 비법이\n뭐예요?!", "단골인 저도\n처음 먹는 맛!", "와… 또 반했어요!"],
+    "regular:grandma": ["아이고, 이게 웬\n신선놀음이여!", "할미 평생\n이런 맛 처음이여!"],
+    drunk: ["딸꾹… 별이\n보여요~ 반짝반짝~", "이 맛에 술이\n다 깨네!"],
+    jinsang: ["…인정. 맛있네요.", "이건 리뷰에\n별 다섯 개!"],
+  },
   // 미식가 (이벤트): 요리 하나 받을 때마다 평가 한마디
   g_perfect: { normal: ["음…! 훌륭해!", "바로 이 맛이야!", "불 조절이\n완벽하군.", "이건 수첩에\n적어 둬야겠어."] },
   g_cooked: { normal: ["흠… 평범하군.", "먹을 만은 하네.\n그뿐이야.", "조금만 더\n신경 쓰지 그랬나."] },
@@ -551,7 +629,7 @@ export const REACTION_LINES: Record<string, Record<string, string[]>> = {
   g_wrong: { normal: ["내가 시킨 건\n이게 아닐세.", "주문을 다시\n보게나."] },
 };
 export const REACTION_MOODS: Record<string, string> = {
-  raw: "yuck", burnt: "shock", wrong: "confused",
+  raw: "yuck", burnt: "shock", wrong: "confused", tip: "happy", magic: "happy",
   g_perfect: "happy", g_cooked: "confused", g_burnt: "shock", g_raw: "yuck", g_late: "angry", g_wrong: "confused",
 };
 export const SAY_TIME = 2.6; // 말풍선이 떠 있는 시간 (초)

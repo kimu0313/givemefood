@@ -113,6 +113,12 @@ export class TitleScene extends Scene {
     col.appendChild(money);
 
     this.ui.appendChild(this.accountBox());
+    // 소리 켜기/끄기 (계정 칸 아래)
+    const snd = Ui.soundToggle(76);
+    snd.style.position = "absolute";
+    snd.style.right = "40px";
+    snd.style.top = "150px";
+    this.ui.appendChild(snd);
   }
 
   // ---------------------------------------------------------------- 계정 (로그인 / 로그아웃)

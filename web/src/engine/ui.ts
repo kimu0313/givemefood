@@ -5,6 +5,7 @@
 
 import { Color, WHITE, rgb } from "./geom.ts";
 import { DISPLAY_STACK, FONT_STACK } from "./gfx.ts";
+import { Sound } from "./audio.ts";
 
 export const INK = rgb(0.23, 0.14, 0.08);
 export const CREAM = rgb(0.99, 0.95, 0.86);
@@ -123,8 +124,35 @@ export function onPress(b: HTMLElement, fn: () => void): void {
   b.addEventListener("click", (e) => {
     e.stopPropagation();
     if ((b as HTMLButtonElement).disabled) return;
+    Sound.playSfx("click");
     fn();
   });
+}
+
+/** 소리 켜기/끄기 동그란 버튼 (상태는 저장됨) */
+export function soundToggle(size = 72): HTMLButtonElement {
+  const b = button("", SECONDARY, 30, size);
+  b.style.width = `${size}px`;
+  b.style.height = `${size}px`;
+  b.style.padding = "0";
+  b.style.borderRadius = "50%";
+  const paint = () => {
+    b.replaceChildren();
+    const ic = div("ic");
+    ic.innerHTML = Sound.muted ? ICON.soundOff : ICON.soundOn;
+    ic.style.width = `${size * 0.6}px`;
+    ic.style.height = `${size * 0.6}px`;
+    b.appendChild(ic);
+    b.title = Sound.muted ? "소리 켜기" : "소리 끄기";
+  };
+  paint();
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    Sound.setMuted(!Sound.muted);
+    paint();
+    Sound.playSfx("click");
+  });
+  return b;
 }
 
 /** 크림색 종이 창 (두꺼운 먹선 테두리 + 안쪽 흰 테 + 아래 두께) */
@@ -236,6 +264,9 @@ export function textField(placeholder: string, maxLen: number, onEnter: () => vo
 
 // 아이콘 (먹선 테두리 + 통통한 모양, 크기는 상자에 맞춰 늘어남)
 export const ICON = {
+  magic: `<svg viewBox="0 0 64 64"><rect x="18" y="6" width="28" height="10" rx="4" fill="#8c4fd1" stroke="#3b2415" stroke-width="3"/><path d="M16 18h32v32a8 8 0 0 1-8 8H24a8 8 0 0 1-8-8z" fill="#e6f6ff" fill-opacity="0.5" stroke="#3b2415" stroke-width="3.5"/><path d="M19 34h26v15a6 6 0 0 1-6 6H25a6 6 0 0 1-6-6z" fill="#ee8cf2"/><path d="M22 24v22" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity="0.8"/><path d="M50 6l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" fill="#ffd85a"/><path d="M10 26l1.5 3.5 3.5 1.5-3.5 1.5L10 36l-1.5-3.5L5 31l3.5-1.5z" fill="#9fe0ff"/><path d="M38 40l1.4 3 3 1.4-3 1.4-1.4 3-1.4-3-3-1.4 3-1.4z" fill="#fff"/></svg>`,
+  soundOn: `<svg viewBox="0 0 48 48"><path d="M8 18h8l11-9v30l-11-9H8z" fill="#fff" stroke="#3b2415" stroke-width="4" stroke-linejoin="round"/><path d="M32 17q5 7 0 14M37 12q9 12 0 24" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round"/></svg>`,
+  soundOff: `<svg viewBox="0 0 48 48"><path d="M8 18h8l11-9v30l-11-9H8z" fill="#fff" stroke="#3b2415" stroke-width="4" stroke-linejoin="round"/><path d="M33 18l10 12M43 18L33 30" stroke="#ff8a7a" stroke-width="5" stroke-linecap="round"/></svg>`,
   user: `<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21" fill="#ffe0a8" stroke="#3b2415" stroke-width="3.5"/><path d="M10.5 39.5a14 12 0 0 1 27 0A20 20 0 0 1 10.5 39.5z" fill="#fff" stroke="#3b2415" stroke-width="3.5" stroke-linejoin="round"/><circle cx="24" cy="19.5" r="8" fill="#fff" stroke="#3b2415" stroke-width="3.5"/></svg>`,
   coin: `<svg viewBox="0 0 48 48"><circle cx="24" cy="26" r="20" fill="#9a5a0c"/><circle cx="24" cy="23" r="20" fill="#ffcf3a" stroke="#6b3a06" stroke-width="3.5"/><circle cx="24" cy="23" r="13.5" fill="none" stroke="#e59a14" stroke-width="3"/><path d="M16 17l3.5 12 4.5-9 4.5 9 3.5-12M14.5 22.5h19" fill="none" stroke="#a8620a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="16" cy="13" rx="5" ry="2.6" fill="#fff6c8" transform="rotate(-30 16 13)"/></svg>`,
   star: `<svg viewBox="0 0 48 48"><path d="M24 4l6 13 14 1.6-10.5 9.6 3 14L24 35l-12.5 7.2 3-14L4 18.6 18 17z" fill="#ffd23a" stroke="#6b3a0c" stroke-width="3.5" stroke-linejoin="round"/><path d="M24 10l-3.6 8.6" stroke="#fff6c0" stroke-width="3" stroke-linecap="round"/></svg>`,
@@ -418,6 +449,22 @@ export const UI_CSS = `
   box-shadow: inset 0 6px 0 rgba(120,70,20,0.12); transition: box-shadow 120ms, border-color 120ms; }
 .field:focus { border-color: #c2461a; box-shadow: inset 0 6px 0 rgba(120,70,20,0.12), 0 0 0 6px rgba(238,94,43,0.28); }
 .field::placeholder { color: rgba(130,105,80,0.55); }
+@keyframes sign-swing { 0%, 100% { transform: rotate(-2.5deg); } 50% { transform: rotate(2.5deg); } }
+@keyframes sign-sub { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+.shop-sign { position: absolute; top: 168px; width: 440px; pointer-events: auto; cursor: pointer; transform-origin: 50% 0; animation: sign-swing 2.4s ease-in-out infinite; z-index: 5;
+  transition: left 0.6s cubic-bezier(.5,0,.3,1), top 0.6s cubic-bezier(.5,0,.3,1), scale 0.6s cubic-bezier(.5,0,.3,1); }
+.shop-sign-strings { height: 46px; margin: 0 70px; border-left: 5px solid #3b2415; border-right: 5px solid #3b2415; }
+.shop-sign-board { box-sizing: border-box; padding: 16px 20px 18px; border: 6px solid #2a160a; border-radius: 22px; text-align: center;
+  background: repeating-linear-gradient(180deg, #a5502e 0 24px, #94462a 24px 26px), #a5502e; box-shadow: inset 0 -8px 0 rgba(0,0,0,0.25), 0 10px 0 rgba(30,14,6,0.55), 0 16px 24px rgba(0,0,0,0.45);
+  transition: transform 0.18s ease-in, background 0.2s; }
+.shop-sign:hover .shop-sign-board { filter: brightness(1.08); }
+.shop-sign-sub { animation: sign-sub 1.2s ease-in-out infinite; margin-top: 2px; }
+.shop-sign.flipping .shop-sign-board { transform: rotateY(90deg); }
+.shop-sign.open { cursor: default; animation: none; }
+.shop-sign.open .shop-sign-board { background: repeating-linear-gradient(180deg, #4c9a3a 0 24px, #43892f 24px 26px), #4c9a3a; }
+.shop-sign.open .shop-sign-sub { animation: none; }
+.shop-sign.corner { left: 14px !important; top: 104px; scale: 0.42; transform-origin: 0 0; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .shop-sign, .shop-sign-sub { animation: none; } .shop-sign, .shop-sign-board { transition: none; } }
 .inset { box-sizing: border-box; background: rgba(120,70,30,0.09); border: 3px solid rgba(80,45,20,0.18); border-radius: 22px; }
 
 .logo { position: relative; white-space: pre; line-height: 1.15; pointer-events: none; filter: drop-shadow(0 10px 14px rgba(0,0,0,0.55)); }

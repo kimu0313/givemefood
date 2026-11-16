@@ -131,6 +131,18 @@ export function sparkle(g: Gfx, c: V, s: number, color: Color = SPARKLE): void {
   g.polygon(pts, color);
 }
 
+const MAGIC_COLORS = [rgb(1.0, 0.85, 0.35), rgb(0.95, 0.6, 1.0), rgb(0.6, 0.9, 1.0), rgb(1.0, 1.0, 1.0)];
+
+/** 마법의 가루 반짝이: c 둘레 반지름 r 에 별 모양이 돌아가며 깜빡인다 (t = 시계) */
+export function magicSparkles(g: Gfx, c: V, r: number, t: number, n = 5): void {
+  for (let k = 0; k < n; k++) {
+    const a = t * 0.9 + (k * PI * 2.0) / n;
+    const tw = 0.5 + 0.5 * Math.sin(t * 5.0 + k * 1.7);
+    const p = c.add(v(Math.cos(a) * r, Math.sin(a) * r * 0.62 - 6.0));
+    sparkle(g, p, 0.55 + 0.6 * tw, MAGIC_COLORS[k % MAGIC_COLORS.length].withA(0.55 + 0.45 * tw));
+  }
+}
+
 export function checkMark(g: Gfx, c: V, s: number, color: Color): void {
   g.polyline([c.add(v(-12, 0).mul(s)), c.add(v(-3, 10).mul(s)), c.add(v(14, -10).mul(s))], color, 6.0 * s);
 }

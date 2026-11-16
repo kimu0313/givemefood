@@ -29,6 +29,8 @@ const TRASH_X = 1720.0;
 const TRASH_SCALE = 0.85;
 const BOWLS_X = 200.0;
 const BOWLS_SCALE = 0.8;
+const POWDER_X = 455.0; // 마법의 가루 통 (그릇 더미와 재료통 사이)
+const POWDER_SIZE = v(150, 176);
 
 /** 도마 위 음식: 한 번이라도 손질하면 손질된 모습. 단계가 있는 메뉴(김밥)는 단계마다 모습이 바뀐다 */
 export function drawBoardFood(g: Gfx, menu: string, taps: number, c: V, s: number, col: Color): void {
@@ -89,6 +91,14 @@ export class KitchenView extends Node2D {
   binRect(i: number): R {
     const s = BIN_BASE.mul(BIN_SCALE);
     return R.of(this.binCenter(i).sub(s.mul(0.5)), s);
+  }
+
+  powderCenter(): V {
+    return v(this.x0 + POWDER_X, this.binsY);
+  }
+
+  powderRect(): R {
+    return R.of(this.powderCenter().sub(POWDER_SIZE.mul(0.5)), POWDER_SIZE);
   }
 
   trashCenter(): V {
@@ -155,7 +165,60 @@ export class KitchenView extends Node2D {
     this.drawBins(g);
     this.drawBowlStack(g);
     this.drawTrash(g);
+    this.drawPowder(g);
     g.resetTransform();
+  }
+
+  /**
+   * 마법의 가루 통: 유리병 + 보라 뚜껑 + 반짝이는 가루 (남은 개수만큼 차 있음) + 개수 배지.
+   * 준비(armed)하면 빛 고리가 퍼지고 열린 재료통들이 보랏빛으로 빛남 ("어디에 뿌릴까요?")
+   */
+  private drawPowder(g: Gfx): void {
+    const s = this.session;
+    const c = this.powderCenter();
+    const t = this.t;
+    const armed = s.powderArmed;
+    const have = s.powder;
+    if (armed) {
+      const ring = (t * 1.2) % 1.0;
+      g.ctx.save();
+      g.ctx.strokeStyle = rgb(0.9, 0.6, 1.0, 0.9 * (1.0 - ring)).css();
+      g.ctx.lineWidth = 6.0;
+      g.ctx.beginPath();
+      g.ctx.ellipse(c.x, c.y, 80 + ring * 30, 92 + ring * 30, 0, 0, Math.PI * 2);
+      g.ctx.stroke();
+      g.ctx.restore();
+      // 열린 재료통도 보랏빛 테두리
+      const menus = this.binMenus();
+      for (let i = 0; i < menus.length; i++) {
+        if (!s.menuPool.includes(menus[i])) continue;
+        FoodArt.roundedRect(g, this.binRect(i).grow(6.0), rgb(0, 0, 0, 0), 22.0, rgb(0.85, 0.55, 1.0, 0.6 + 0.4 * Math.sin(t * 6.0)), 5);
+      }
+    }
+    const bob = armed ? Math.sin(t * 6.0) * 4.0 : 0.0;
+    const body = new R(c.x - 48, c.y - 56 + bob, 96, 100);
+    FoodArt.ellipse(g, v(c.x, c.y + 48), 56.0, 12.0, rgb(0, 0, 0, 0.25));
+    // 가루 (남은 개수만큼)
+    const fill = Math.min(1.0, have / 5.0);
+    if (fill > 0) {
+      const fh = (body.h - 18) * fill;
+      FoodArt.roundedRect(g, new R(body.x + 7, body.endY - 9 - fh, body.w - 14, fh), have > 0 ? rgb(0.93, 0.55, 0.95) : rgb(0.5, 0.5, 0.5), 14.0);
+      FoodArt.roundedRect(g, new R(body.x + 7, body.endY - 9 - fh, body.w - 14, Math.min(fh, 10)), rgb(1.0, 0.85, 1.0, 0.8), 6.0);
+    }
+    // 유리병
+    FoodArt.roundedRect(g, body, rgb(0.85, 0.95, 1.0, 0.28), 20.0, rgb(0.23, 0.14, 0.08), 5);
+    g.line(v(body.x + 18, body.y + 16), v(body.x + 18, body.endY - 22), rgb(1, 1, 1, 0.6), 6.0);
+    // 뚜껑 + 별 장식
+    FoodArt.roundedRect(g, new R(c.x - 40, body.y - 22, 80, 26), rgb(0.55, 0.3, 0.82), 9.0, rgb(0.23, 0.14, 0.08), 4);
+    FoodArt.sparkle(g, v(c.x, body.y - 9), 0.75, rgb(1.0, 0.86, 0.35));
+    if (have > 0) FoodArt.magicSparkles(g, v(c.x, body.y + 34 + bob), 62.0, t, armed ? 6 : 3);
+    // 이름표 + 개수
+    FoodArt.textOutlined(g, armed ? "뿌릴 준비!" : "마법의 가루", v(c.x, c.y + 64), 21, armed ? rgb(1.0, 0.85, 1.0) : rgb(1.0, 0.95, 0.85), rgb(0.25, 0.1, 0.3), 6, 190);
+    const bc = v(body.endX - 4, body.y - 14);
+    g.circle(bc.add(v(0, 3)), 22.0, rgb(0, 0, 0, 0.3));
+    g.circle(bc, 22.0, rgb(0.23, 0.14, 0.08));
+    g.circle(bc, 18.0, have > 0 ? rgb(0.62, 0.32, 0.88) : rgb(0.5, 0.48, 0.5));
+    FoodArt.textOutlined(g, String(have), bc.add(v(0, 1)), 24, WHITE, rgb(0.15, 0.05, 0.2), 5, 40);
   }
 
   /** 메뉴마다 전용 그릇 2개. 빈 칸엔 빈 그릇, 아직 안 열린 메뉴는 흐리게 + 자물쇠. 묶음 아래에 메뉴 이름 */
@@ -168,7 +231,10 @@ export class KitchenView extends Node2D {
       FoodArt.ellipse(g, this.trayCenter(i).add(v(0, 30)), 56.0, 13.0, rgb(0, 0, 0, 0.16));
       const bowl = s.tray[i];
       if (bowl === null || i === this.hiddenTraySlot) DishArt.draw(g, menu, c, BOWL_SCALE, D.Q.PERFECT, true);
-      else DishArt.draw(g, bowl.menu, c, BOWL_SCALE, bowl.quality);
+      else {
+        DishArt.draw(g, bowl.menu, c, BOWL_SCALE, bowl.quality);
+        if (bowl.magic) FoodArt.magicSparkles(g, c, 50.0, this.t + i, 4);
+      }
     }
     for (let gi = 0; gi < Math.trunc(n / D.TRAY_PER_MENU); gi++) {
       const first = gi * D.TRAY_PER_MENU;
@@ -235,6 +301,20 @@ export class KitchenView extends Node2D {
         const fs = mname.length <= 4 ? 30 : mname.length === 5 ? 26 : 22;
         FoodArt.text(g, mname, r.pos.add(v(r.w * 0.5, 128)), fs, INK, r.w);
         FoodArt.text(g, D.formatWon(D.menuPrice(id)), r.pos.add(v(r.w * 0.5, 158)), 22, rgb(0.35, 0.3, 0.28), r.w);
+        // 남은 재료 (재료를 사서 쓰는 영업만): 오른쪽 위 동그란 배지, 다 떨어지면 카드 위에 "품절"
+        const left = this.session.stockLeft(id);
+        if (left !== Infinity) {
+          const bc = r.pos.add(v(r.w - 14.0, 10.0));
+          const col = left <= 0 ? rgb(0.85, 0.24, 0.18) : left <= 3 ? rgb(0.95, 0.6, 0.12) : rgb(0.29, 0.62, 0.27);
+          g.circle(bc.add(v(0, 3)), 27.0, rgb(0, 0, 0, 0.3));
+          g.circle(bc, 27.0, rgb(0.23, 0.14, 0.08));
+          g.circle(bc, 23.0, col);
+          FoodArt.textOutlined(g, String(left), bc.add(v(0, 1)), left >= 10 ? 24 : 28, WHITE, rgb(0.15, 0.08, 0.04), 5, 46.0);
+          if (left <= 0) {
+            FoodArt.roundedRect(g, r.grow(-4.0), rgb(0.1, 0.06, 0.05, 0.55), 18.0);
+            FoodArt.textOutlined(g, "품절", r.pos.add(v(r.w * 0.5, 72)), 40, rgb(1.0, 0.86, 0.8), rgb(0.5, 0.08, 0.05), 8, r.w);
+          }
+        }
       } else {
         FoodArt.roundedRect(g, r.grow(-4.0), rgb(0.12, 0.1, 0.1, 0.88), 20.0);
         FoodArt.lockIcon(g, r.pos.add(v(r.w * 0.5, 61)), 1.1, rgb(0.85, 0.8, 0.75));

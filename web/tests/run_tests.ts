@@ -157,10 +157,12 @@ function testCustomers(): void {
   const wrong = c.serve("odeng", Q.PERFECT);
   ok(wrong.result === "reject" && wrong.reason === "wrong", "주문 안 한 메뉴는 거절 (이유: wrong)");
   const res = c.serve("tteokbokki", Q.PERFECT);
-  ok(res.paid === 3000 && res.tip === 900 && res.done === true, "일반 손님 완벽 떡볶이 = 3,000 + 팁 900");
+  ok(res.paid === 3000 && res.tip === 0 && res.done === true, "일반 손님 완벽 떡볶이 = 3,000, 팁 없음 (팁은 단골만)");
   ok(c.state === CState.HAPPY, "주문을 다 받으면 만족");
 
-  ok(new CustomerLogic("hurry", one).serve("tteokbokki", Q.PERFECT).tip === 1350, "급한 손님 팁 1.5배");
+  for (const t of ["hurry", "jinsang", "drunk"]) ok(new CustomerLogic(t, one).serve("tteokbokki", Q.PERFECT).tip === 0, `${t}: 팁 없음`);
+  ok(new CustomerLogic("regular", one).serve("tteokbokki", Q.PERFECT).tip === 1800, "단골만 팁 (완벽 떡볶이 3,000원 → 팁 1,800)");
+  ok(new CustomerLogic("regular", one).serve("tteokbokki", Q.COOKED).tip === 0, "단골도 완벽이 아니면 팁 없음");
   ok(new CustomerLogic("regular", one).serve("tteokbokki", Q.PERFECT).tip === 1800, "단골 팁 2배");
   ok(new CustomerLogic("normal", one).serve("tteokbokki", Q.COOKED).tip === 0, "익음 = 팁 없음");
 
@@ -240,7 +242,25 @@ function testSessionServeFlow(): void {
     ok(s.serve(slot, other).result === "reject", "엉뚱한 자리에 서빙하면 거절");
   }
   const sv = s.serve(slot, seat);
-  ok(sv.result === "ok" && s.sales === 3000 && s.tips === 900, "세션: 서빙 매출 3,000 + 팁 900");
+  ok(sv.result === "ok" && s.sales === 3000 && s.tips === 0, "세션: 서빙 매출 3,000 (일반 손님은 팁 없음)");
+  // 단골은 완벽한 요리에 팁을 주며 한마디 (customerReacted "tip"), 대사를 다 하도록 자리는 조금 늦게 빈다
+  {
+    const st = new ShiftSession();
+    st.setupStory(2, 2, 1.0, 1.0, 5);
+    const reg = new CustomerLogic("regular", ["tteokbokki"]);
+    reg.regularId = "grandma";
+    st.debugSeatCustomer(0, reg);
+    const said: string[] = [];
+    st.customerReacted.connect((_seat, kind) => said.push(kind));
+    const sl = st.freeTraySlot("tteokbokki");
+    st.tray[sl] = { menu: "tteokbokki", quality: Q.PERFECT };
+    const rs = st.serve(sl, 0);
+    ok(rs.result === "ok" && st.tips === 1800 && said.join() === "tip" && st.seatWait[0] >= D.RAW_LEAVE_DELAY, "단골 팁 + 한마디, 대사 동안 자리 비워 둠");
+    ok(D.reactionLines("tip", "regular", "grandma").length > 0 && D.reactionLines("tip", "regular", "nobody").length > 0, "단골마다 팁 대사 (없으면 공통)");
+    // 팁 대사는 단골인 티만 내고 팁·돈 얘기는 직접 안 함 (2026-11-16 사용자 요청)
+    const tipLines = Object.values(D.REACTION_LINES.tip).flat();
+    ok(tipLines.every((l) => !/팁|용돈|잔돈|돈|받아|넣어 둬/.test(l)), "팁 대사에 팁·돈 얘기 없음");
+  }
   ok(s.seats[seat] === null && s.happyCount === 1 && s.itemsPerfect === 1, "만족 손님 퇴장 + 완벽 카운트");
 }
 
@@ -725,9 +745,9 @@ function testAccounts(): void {
   g.wallet = 9000;
   g.saveGame();
   g.logout();
-  ok(g.account === "" && g.level === 1 && g.wallet === 0, "로그아웃하면 빈 게스트");
+  ok(g.account === "" && g.level === 1 && g.wallet === D.START_MONEY, "로그아웃하면 빈 게스트 (개업 자금만)");
   const r2 = g.login("Lee");
-  ok(r2.ok && r2.created && !r2.carried && g.level === 1 && g.wallet === 0, "게스트 기록이 없으면 새 계정은 처음부터");
+  ok(r2.ok && r2.created && !r2.carried && g.level === 1 && g.wallet === D.START_MONEY && g.tutorial === "start", "게스트 기록이 없으면 새 계정은 처음부터 (튜토리얼부터)");
   g.wallet = 70;
   g.logout();
   const r3 = g.login("김 사장");
@@ -802,6 +822,132 @@ function testEvents(): void {
   }
 }
 
+/** 단골 6명 (가게마다 새 단골 1·2·3명), 재료 (사기·쓰기·품절·외상·저장), 튜토리얼 상태 */
+function testRegularsAndStock(): void {
+  ok(D.REGULARS.length === 6 && D.REGULARS.some((r) => r.id === "cafe"), "단골 6명 (카페 알바생 수아 추가)");
+  const counts = D.SHOPS.map((s) => D.regularsNewAt(s.id).length);
+  ok(same(counts, [1, 2, 3, 0, 0]), `가게마다 새 단골 1·2·3명, 4·5번째는 없음 (${counts})`);
+  ok(D.regularsFor("pocha").length === 1 && D.regularsFor("bunsik").length === 3 && D.regularsFor("market").length === 6 && D.regularsFor("suljip").length === 6, "뒤 가게엔 앞에서 만난 단골이 다 옴");
+  const pick = (sid: string, n: number): Set<string> => {
+    const s = new ShiftSession();
+    s.setupStory(D.shopDef(sid).first_level, 2, 1.0, 1.0, 3);
+    const seen = new Set<string>();
+    for (let i = 0; i < n; i++) seen.add(s.pickRegular().id);
+    return seen;
+  };
+  ok(same([...pick("pocha", 50)], ["taxi"]), "첫 가게 단골은 택시 기사 한 명");
+  const b = pick("bunsik", 300);
+  ok(b.size === 3 && b.has("cafe") && b.has("student") && b.has("taxi"), `두 번째 가게: 택시 기사 + 대학생 + 수아 (${[...b]})`);
+  ok(pick("beach", 600).size === 6, "네 번째 가게엔 여섯 명 모두");
+
+  // 재료: 1인분 값 = 메뉴 값의 25% (50원 단위)
+  ok(D.ingredientCost("tteokbokki") === 750 && D.ingredientCost("odeng") === 400, "1인분 재료값");
+  const need1 = D.stockNeed(1);
+  ok(same(Object.keys(need1), ["tteokbokki"]) && need1.tteokbokki >= 8 && need1.tteokbokki <= D.STOCK_MAX, `스테이지 1 하루 재료 어림 (${need1.tteokbokki}인분)`);
+
+  const s = new ShiftSession();
+  s.setupStory(3, 2, 1.0, 1.0, 9);
+  s.useStock({ tteokbokki: 6, sundae: 0, odeng: 2 });
+  const pan = s.addIngredient("tteokbokki");
+  ok(pan >= 0 && s.stockLeft("tteokbokki") === 6 - D.PAN_PORTIONS && s.stationItem("pan", pan)!.portions === D.PAN_PORTIONS, "떡볶이 한 판 = 그릇 수만큼 재료를 씀");
+  ok(s.addIngredient("sundae") === -2, "재료가 없으면 못 올림 (-2)");
+  s.addIngredient("odeng");
+  s.addIngredient("odeng");
+  ok(s.stockLeft("odeng") === 0 && s.addIngredient("odeng") === -2, "어묵 2인분 다 씀");
+  ok(s.soldOut("sundae") && !s.soldOut("odeng"), "재료도 만든 것도 없으면 품절 (어묵은 칸에 있음)");
+  for (let i = 0; i < 60; i++) {
+    (s as unknown as { spawnCustomer(seat: number): void }).spawnCustomer(0);
+    ok(!s.seats[0]!.unservedMenus().includes("sundae"), "품절 메뉴는 주문 안 함");
+    s.seats[0] = null;
+  }
+  const disc = s.discardStation("pan", pan);
+  ok(disc === 0 && s.waste === 0 && s.wasted === D.PAN_PORTIONS, "재료를 사서 쓰면 버려도 돈은 안 빠짐 (그릇 수만 셈)");
+  ok(s.result().stock_left!.tteokbokki === 6 - D.PAN_PORTIONS, "결과에 남은 재료");
+
+  const gs = newState();
+  ok(gs.wallet === D.START_MONEY && gs.tutorial === "start" && gs.stockOf("pocha", "tteokbokki") === 0, "새 게임: 개업 자금 + 튜토리얼 + 재료 없음");
+  ok(gs.buyStock("pocha", "tteokbokki", 10) && gs.stockOf("pocha", "tteokbokki") === 10 && gs.wallet === D.START_MONEY - 7500, "재료 10인분 사기");
+  gs.wallet = 100000;
+  ok(gs.buyStock("pocha", "tteokbokki", 100) && gs.stockOf("pocha", "tteokbokki") === D.STOCK_MAX && !gs.buyStock("pocha", "tteokbokki", 5), "창고 최대까지만, 가득 차면 못 삼");
+  gs.wallet = 100;
+  ok(!gs.buyStock("pocha", "sundae", 5), "돈이 모자라면 못 삼");
+  gs.level = 3;
+  const cost = gs.shortageCost(3);
+  ok(cost > 0 && gs.buyShortage(3) === cost && gs.wallet === 100 - cost && Object.keys(gs.stockShortage(3)).length === 0, "모자란 재료는 외상으로 (지갑 마이너스)");
+  gs.recordResult({ ...result(3, true, 30000, 3), stock_left: { tteokbokki: 7, sundae: 1, odeng: 0, twigim: 0 } });
+  gs.settle(false, false);
+  ok(gs.wallet === 100 - cost + 30000 && gs.stockOf("pocha", "tteokbokki") === 7, "정산에서 외상을 갚고 남은 재료 저장");
+  gs.levelStars["7"] = 5;
+  gs.level = 7;
+  gs.wallet = D.shopOpenCost("bunsik");
+  ok(gs.buyShop("bunsik") && gs.wallet === 0 && gs.stockOf("bunsik", D.shopDef("bunsik").menus[0]) === D.NEW_SHOP_STOCK, "새 가게를 열면 첫 메뉴 재료 선물 (돈을 다 써도 영업 가능)");
+  const saved = newState();
+  saved.applySave(JSON.parse(JSON.stringify(gs.saveData())));
+  ok(saved.stockOf("pocha", "tteokbokki") === 7 && saved.tutorial === gs.tutorial, "재료·튜토리얼 저장");
+  const old = newState();
+  old.applySave({ version: 6, level: 10, wallet: 5000, level_stars: { "1": 3, "7": 4 } });
+  ok(old.tutorial === "" && old.stockOf("pocha", "odeng") === D.STOCK_PACK * 2 && old.stockOf("bunsik", "ramen") === D.STOCK_PACK * 2 && old.stockOf("market", "tornado") === 0, "예전 저장: 튜토리얼 건너뜀 + 열린 메뉴마다 재료 10인분");
+  const fresh = newState();
+  fresh.applySave({ version: 6, level: 1, wallet: D.START_MONEY });
+  ok(fresh.tutorial === "start", "아무것도 안 한 저장이면 튜토리얼부터");
+}
+
+/** 팻말 (문 열기 전엔 손님 없음, 미리 조리 가능), 영업 중 재료 더 사기, 마법의 가루 */
+function testSignAndMagic(): void {
+  const s = new ShiftSession();
+  s.setupStory(1, 2, 1.0, 1.0, 4);
+  s.useStock({ tteokbokki: 10 });
+  s.closeShop();
+  const pan = s.addIngredient("tteokbokki");
+  for (let i = 0; i < 100; i++) s.update(0.1);
+  ok(s.spawned === 0 && s.seatedCount() === 0 && s.elapsed === 0, "'준비 중' 팻말이면 손님이 안 오고 시간도 안 감");
+  ok(s.stationItem("pan", pan)!.stepElapsed > 9.0, "문 열기 전에도 미리 조리됨");
+  s.open();
+  s.update(D.FIRST_SPAWN_DELAY + 0.05);
+  ok(s.spawned === 1, "팻말을 '영업 중'으로 바꾸면 첫 손님");
+  s.addStock("tteokbokki", 100);
+  ok(s.stockLeft("tteokbokki") === D.STOCK_MAX, "영업 중 재료 더 사기 (창고 최대까지)");
+
+  // 마법의 가루: 빨리 익고, 완벽해지면 끝까지 완벽 (타는 메뉴도 안 탐), 값 2배
+  const it = new CookItem("twigim");
+  it.magic = true;
+  const ps = MENUS_STEP(it).perfect_start ?? 0;
+  run(it, ps / D.MAGIC_SPEED + 0.05);
+  ok(it.stepQuality() === Q.PERFECT, `가루 뿌린 튀김은 ${D.MAGIC_SPEED}배 빨리 완벽`);
+  run(it, 600.0);
+  ok(!it.burnt && it.stepQuality() === Q.PERFECT && !it.isOvercooked(), "가루 뿌린 튀김은 오래 둬도 안 탐");
+  const plain = new CustomerLogic("normal", ["tteokbokki"]);
+  ok(plain.serve("tteokbokki", Q.PERFECT, true).paid === 6000, "가루 뿌린 떡볶이는 값 2배 (6,000원)");
+  const m = new ShiftSession();
+  m.setupStory(3, 2, 1.0, 1.0, 4);
+  ok(!m.armPowder(), "가루가 없으면 준비 안 됨");
+  m.powder = 1;
+  ok(m.armPowder() && m.powderArmed, "가루 통 탭 → 준비");
+  const p2 = m.addIngredient("tteokbokki");
+  ok(m.stationItem("pan", p2)!.magic && m.powder === 0 && m.powderUsed === 1 && !m.powderArmed, "다음에 올린 판 전체에 가루, 하나 씀");
+  m.addIngredient("odeng");
+  ok(!m.stationItem("broth", 0)!.magic, "그다음 재료엔 안 뿌림");
+  for (let i = 0; i < 40; i++) m.update(0.1);
+  const r = m.tapStation("pan", p2);
+  ok(r.action === "take_out" && m.tray[r.slot!]!.magic === true, "가루 뿌린 판에서 덜어 낸 그릇도 마법");
+  ok(m.result().powder_used === 1, "결과에 쓴 가루");
+
+  const gs = newState();
+  ok(gs.buyPowder() && gs.powder === 1 && gs.wallet === D.START_MONEY - D.POWDER_PRICE, `마법의 가루 하나 ${D.POWDER_PRICE}원`);
+  gs.wallet = 1000000;
+  for (let i = 0; i < 20; i++) gs.buyPowder();
+  ok(gs.powder === D.POWDER_MAX, `가루는 ${D.POWDER_MAX}개까지`);
+  gs.recordResult({ ...result(1, true, 10000, 3), powder_used: 2 });
+  ok(gs.powder === D.POWDER_MAX - 2, "영업에서 쓴 가루만큼 줄어듦");
+  const back = newState();
+  back.applySave(JSON.parse(JSON.stringify(gs.saveData())));
+  ok(back.powder === D.POWDER_MAX - 2, "가루 저장");
+}
+
+function MENUS_STEP(item: CookItem): D.StepDef {
+  return item.step();
+}
+
 function balanceReport(): void {
   console.log("\n-- 밸런스 리포트 (봇: 0.35초마다 1동작, 완벽 구간만 노림, 시드 5개 평균) --");
   const setups = [
@@ -855,6 +1001,8 @@ testNewMenus();
 testGameState();
 testAccounts();
 testEvents();
+testRegularsAndStock();
+testSignAndMagic();
 if (!process.argv.includes("--quick")) balanceReport();
 console.log(`\n== ${checks} checks, ${fails} failed ==`);
 process.exit(fails > 0 ? 1 : 0);

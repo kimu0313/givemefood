@@ -116,8 +116,10 @@ export class CustomerView extends Node2D {
     this.reactMood = D.REACTION_MOODS[kind] ?? "angry";
     this.reactT = kind === "raw" ? D.RAW_LEAVE_DELAY - 0.6 : D.REACTION_TIME;
     this.bumpT = 0.0;
-    this.jolt = kind === "g_perfect" ? 0.0 : 1.0;
-    if (kind === "g_perfect") this.bumpT = 0.9;
+    // 기분 좋은 반응(단골 팁, 미식가 칭찬)은 움찔 대신 폴짝
+    const happy = this.reactMood === "happy";
+    this.jolt = happy ? 0.0 : 1.0;
+    if (happy) this.bumpT = 0.9;
     const line = pickLine(kind, this.customer.typeId, this.customer.regularId);
     if (line !== "") this.say(line);
   }

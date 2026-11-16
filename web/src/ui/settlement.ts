@@ -78,6 +78,7 @@ export class SettlementScene extends Scene {
     this.add(rain);
     this.build();
     Sound.playBgm("settlement");
+    if (this.r.passed && !this.r.endless) Sound.playSfx("fanfare");
   }
 
   private endless(): boolean {
@@ -125,7 +126,8 @@ export class SettlementScene extends Scene {
     if (this.endless()) rc.appendChild(receiptRow("버틴 시간", D.formatTime(r.elapsed), 30, Ui.MUTED, Ui.MUTED));
     else rc.appendChild(receiptRow("할당량", D.formatWon(r.target), 30, Ui.MUTED, Ui.MUTED));
     const stat = Ui.inset(12);
-    stat.appendChild(Ui.label(`완벽 서빙 ${D.roundHalfAway(r.perfect_ratio * 100.0)}% · 만족 ${r.happy}명 · 화난 손님 ${r.angry}명`, 27, Ui.INK, "center", true));
+    const wasted = r.wasted ?? 0;
+    stat.appendChild(Ui.label(`완벽 서빙 ${D.roundHalfAway(r.perfect_ratio * 100.0)}% · 만족 ${r.happy}명 · 화난 손님 ${r.angry}명${wasted > 0 ? ` · 버린 음식 ${wasted}그릇` : ""}`, 27, Ui.INK, "center", true));
     rc.appendChild(stat);
 
     const side = Ui.vbox(14);
@@ -143,6 +145,16 @@ export class SettlementScene extends Scene {
     }
     side.appendChild(starRow(r.stars, 560, 120, 50, true).el);
 
+    // 재료가 바닥난 메뉴 알림 (다음 영업 전에 장보기)
+    if (r.stock_left !== undefined) {
+      const empty = Object.keys(r.stock_left).filter((m) => r.stock_left![m] <= 2 && D.menuUnlockLevel(m) <= Math.max(r.level, GameState.level));
+      if (empty.length > 0) side.appendChild(this.note(`재료가 거의 없어요: ${empty.map((m) => `${D.menuName(m)} ${r.stock_left![m]}인분`).join(", ")}\n지도의 '장보기'에서 채워 두세요`, rgb(1.0, 0.7, 0.55)));
+    }
+    // 외상(지갑 마이너스)은 오늘 번 돈에서 갚는다
+    if (GameState.wallet < 0) {
+      const left = -(GameState.wallet + Math.max(0, r.revenue));
+      side.appendChild(this.note(left > 0 ? `외상이 아직 ${D.formatWon(left)} 남았어요` : `재료 외상 ${D.formatWon(-GameState.wallet)}을 오늘 번 돈으로 갚았어요`, rgb(1.0, 0.8, 0.6)));
+    }
     const regulars = r.regulars ?? [];
     if (regulars.length > 0) {
       const names: string[] = [];

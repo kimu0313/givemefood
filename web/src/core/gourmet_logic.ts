@@ -3,7 +3,7 @@
 // 못 받은 요리는 0점으로 넘기고 다음 코스 (화내며 떠나지 않음 — 코스를 끝까지 본다).
 // 덜 익은 요리도 받기는 한다 (0점, 돈 없음). 마지막 코스가 끝나면 finished.
 
-import { Q, GOURMET_PATIENCE_DECAY, GOURMET_PATIENCE_MIN, GOURMET_POINTS, burntPrice, menuPrice, tipFor } from "./defs.ts";
+import { Q, MAGIC_PRICE_MULT, GOURMET_PATIENCE_DECAY, GOURMET_PATIENCE_MIN, GOURMET_POINTS, burntPrice, menuPrice, tipFor } from "./defs.ts";
 import { CState, CustomerLogic, type ServeResult } from "./customer_logic.ts";
 import type { Rng } from "../engine/rng.ts";
 
@@ -56,7 +56,7 @@ export class GourmetLogic extends CustomerLogic {
   }
 
   /** ok + reason(g_perfect / g_cooked / g_burnt / g_raw) + next(다음 코스로 넘어감) + done(코스 끝) */
-  serve(menuId: string, quality: number): ServeResult {
+  serve(menuId: string, quality: number, magic = false): ServeResult {
     if (this.state !== CState.WAITING) return { result: "reject", reason: "busy" };
     const idx = this.items.findIndex((it) => !it.served && it.menu === menuId);
     if (idx < 0) return { result: "reject", reason: "wrong" };
@@ -81,6 +81,7 @@ export class GourmetLogic extends CustomerLogic {
     } else {
       this.bad += 1;
     }
+    if (magic) paid *= MAGIC_PRICE_MULT;
     this.score += GOURMET_POINTS[quality] ?? 0;
     this.resolved += 1;
     this.earned += paid + tip;

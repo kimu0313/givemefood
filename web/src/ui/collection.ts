@@ -47,7 +47,9 @@ export function openCollection(host: HTMLElement, h: CollectionHandlers): HTMLDi
     card.appendChild(vb);
     if (visits <= 0) {
       vb.appendChild(Ui.heading("???", 34, Ui.MUTED, null, "left"));
-      vb.appendChild(Ui.label("아직 만나지 못한 단골", 26, Ui.MUTED, "left"));
+      // 어느 가게에서 만나는지 힌트 (가게마다 새 단골: 1번째 1명, 2번째 2명, 3번째 3명)
+      const at = D.shopDef(r.shop);
+      vb.appendChild(Ui.label(`${D.shopIndex(at.id) + 1}번째 가게 '${at.name}'에서 만나요`, 26, Ui.MUTED, "left", true));
     } else {
       const head = Ui.hbox(10);
       head.style.alignItems = "baseline";

@@ -27,7 +27,8 @@ import { StationView } from "./station_view.ts";
 import { CustomerView } from "./customer_view.ts";
 import { DragGhost } from "./drag_ghost.ts";
 import { FloatText } from "./float_text.ts";
-import { ShiftHud, type IntroEntry } from "./shift_hud.ts";
+import { ShiftHud, menuPic, type IntroEntry } from "./shift_hud.ts";
+import { Tutorial, elementRect, type TutStep } from "../ui/tutorial.ts";
 
 const BASE_W = 1920.0;
 const DRAG_THRESHOLD = 22.0;
@@ -104,12 +105,15 @@ export class ShiftView extends Scene {
     if (GameState.mode === "endless") {
       const sid = GameState.endlessShop;
       s.setupEndless(sid, GameState.burnerCount(sid), GameState.heatScale(sid), GameState.patienceMult(sid));
+      s.useStock(GameState.stockFor(sid));
     } else if (GameState.mode === "event") {
+      // 미식가 코스 재료는 황 선생이 직접 골라 온다 (가게 재료를 안 씀)
       const sid = GameState.eventShop;
       s.setupEvent(sid, GameState.burnerCount(sid), GameState.heatScale(sid), GameState.patienceMult(sid));
     } else {
       const sid = D.shopForLevel(GameState.playLevel).id;
       s.setupStory(GameState.playLevel, GameState.burnerCount(sid), GameState.heatScale(sid), GameState.patienceMult(sid));
+      s.useStock(GameState.stockFor(sid));
     }
     s.customerArrived.connect((seat) => this.onCustomerArrived(seat));
     s.customerLeft.connect((seat, _c, reason) => this.onCustomerLeft(seat, reason));
@@ -120,12 +124,16 @@ export class ShiftView extends Scene {
     s.ended.connect(() => this.startClosing());
     s.quotaReached.connect(() => {
       this.hud.toast("할당량 달성! 손님이 오는 동안 계속 장사해요", rgb(0.55, 1.0, 0.6));
-      Sound.playSfx("perfect");
+      Sound.playSfx("fanfare");
     });
+    s.powder = GameState.powder; // 마법의 가루 (영업이 끝나면 쓴 만큼 GameState 에서 뺌)
+    s.closeShop(); // "준비 중" 팻말로 시작 — 팻말을 눌러야 손님이 온다
     this.build();
+    this.hud.buildSign(this.vw);
+    this.hud.signPressed.connect(() => this.openShop());
     this.hud.updateStats(s);
     this.showIntro();
-    Sound.playBgm("shift");
+    Sound.playBgm(s.event ? "event" : "shift");
     if (s.shop.rain) Sound.playSfx("rain");
   }
 
@@ -218,6 +226,7 @@ export class ShiftView extends Scene {
   process(dt: number): void {
     if (this.phase === Phase.RUNNING) this.session.update(dt);
     this.hud.updateStats(this.session);
+    this.tut?.update();
   }
 
   private showIntro(): void {
@@ -263,6 +272,140 @@ export class ShiftView extends Scene {
     if (this.session.event) GameState.startEvent(this.session.shopId); // 여기서 기회를 쓴다
     this.hud.hideIntro();
     this.phase = Phase.RUNNING;
+    this.tut = this.makeTutorial();
+    if (this.tut === null) this.hud.toast("준비가 되면 '준비 중' 팻말을 눌러 가게 문을 열어요! (미리 만들어 둬도 돼요)", rgb(1.0, 0.9, 0.6));
+  }
+
+  /** 팻말을 "영업 중"으로 뒤집어 손님을 받기 시작 (캡처 도구도 부름) */
+  openShop(): void {
+    if (this.phase !== Phase.RUNNING || this.session.opened) return;
+    this.session.open();
+    this.hud.flipSign();
+    Sound.playSfx("open");
+    this.hud.toast("영업 시작! 손님이 와요", rgb(0.6, 1.0, 0.6));
+    this.tut?.onEvent("open");
+  }
+
+  // ---------------------------------------------------------------- 영업 중 재료 사기 (품절 재료통을 누르면)
+
+  private buyPanel: HTMLDivElement | null = null;
+
+  /** 품절된 재료통을 누르면: 잠깐 멈추고 그 자리에서 재료 사기 (지갑 + 오늘 번 돈까지 — 모자란 만큼은 정산에서 갚음) */
+  private openBuyPanel(menu: string): void {
+    if (this.buyPanel !== null || this.session.stock === null) return;
+    const s = this.session;
+    const sid = s.shopId;
+    this.game.paused = true;
+    this.cancelDrag();
+    const ov = Ui.overlay(this.ui, 0.55);
+    ov.classList.add("center");
+    ov.style.zIndex = "30";
+    this.buyPanel = ov;
+    const p = Ui.popPanel(Ui.PAPER, 36, 36);
+    p.style.width = "820px";
+    ov.appendChild(p);
+    p.appendChild(Ui.ribbon("재료 사기", Ui.ACCENT, 46));
+    const col = Ui.vbox(14);
+    p.appendChild(col);
+    const pic = menuPic(menu, 300, 130);
+    pic.el.style.alignSelf = "center";
+    col.appendChild(pic.el);
+    const left = s.stockLeft(menu);
+    const unit = D.ingredientCost(menu);
+    col.appendChild(Ui.heading(`${D.menuName(menu)} 재료 ${left}인분 남음`, 40, left <= 0 ? Ui.BAD : Ui.INK, null));
+    const budget = GameState.wallet + Math.max(0, s.revenue());
+    col.appendChild(Ui.label(`1인분 ${D.formatWon(unit)} · 지갑 ${D.formatWon(GameState.wallet)} + 오늘 번 돈 ${D.formatWon(Math.max(0, s.revenue()))}까지 쓸 수 있어요`, 26, Ui.MUTED, "center", true));
+    const row = Ui.hbox(16);
+    col.appendChild(row);
+    const room = Math.max(0, D.STOCK_MAX - left);
+    for (const n of [D.STOCK_PACK, D.STOCK_PACK * 2]) {
+      const k = Math.min(n, room);
+      const b = Ui.button("", Ui.GOOD, 34, 100);
+      b.style.flex = "1 1 0";
+      Ui.withIcon(b, Ui.ICON.coin, `+${k}인분 · ${D.formatWon(k * unit)}`);
+      b.disabled = k <= 0 || budget < k * unit;
+      Ui.onPress(b, () => {
+        // 지갑에서 내고(모자라면 오늘 번 돈으로 — 지갑이 잠깐 마이너스, 정산에서 갚음) 가게 창고와 지금 영업에 함께 넣는다
+        if (!GameState.buyStock(sid, menu, k, true)) return;
+        s.addStock(menu, k);
+        Sound.playSfx("coin");
+        this.hud.toast(`${D.menuName(menu)} 재료 ${k}인분을 샀어요`, rgb(0.6, 1.0, 0.6));
+        this.closeBuyPanel();
+      });
+      row.appendChild(b);
+    }
+    const close = Ui.button("닫기", Ui.SECONDARY, 32, 90);
+    Ui.onPress(close, () => this.closeBuyPanel());
+    col.appendChild(close);
+  }
+
+  private closeBuyPanel(): void {
+    this.buyPanel?.remove();
+    this.buyPanel = null;
+    this.game.paused = false;
+  }
+
+  // ---------------------------------------------------------------- 튜토리얼 (첫 영업: 재료통 → 판 → 그릇 → 마무리)
+
+  private tut: Tutorial | null = null;
+  private tutSlot = -1; // 방금 덜어 낸 그릇 칸
+
+  private stationRect(station: string): R | null {
+    const sv = this.stationViews.find((k) => k.station === station);
+    if (sv === undefined) return null;
+    const w = sv.size.x * sv.scale.x;
+    const h = sv.size.y * sv.scale.y;
+    return new R(sv.position.x - w * 0.5, sv.position.y - h * 0.5, w, h);
+  }
+
+  private makeTutorial(): Tutorial | null {
+    const s = this.session;
+    if (GameState.tutorial !== "cook" || s.endless || s.event || s.level !== 1) return null;
+    const menu = s.menuPool[0];
+    const station = D.menuStation(menu);
+    const bin = this.kitchen.binMenus().indexOf(menu);
+    s.frozen = true; // 설명하는 동안 손님은 기다려 준다
+    // 말 창은 손님이 없는 쪽 위에 (왼쪽 자리에 손님이 있으면 오른쪽, 아니면 왼쪽)
+    const side = (): "left" | "right" => (s.seats[0] !== null ? "right" : "left");
+    const steps: TutStep[] = [
+      {
+        text: "가게 문을 열어야 손님이 와요! 위에 걸린 '준비 중' 팻말을 눌러서 '영업 중'으로 바꿔요. (문 열기 전에 미리 만들어 둬도 돼요)",
+        target: () => {
+          const el = this.hud.signElement();
+          return el !== null ? elementRect(el, this) : null;
+        },
+        wait: "open",
+      },
+      {
+        text: `손님이 오면 머리 위 말풍선에 주문이 떠요. 아래 ${D.menuName(menu)} 재료통을 탭해서 ${D.stationTitle(s.shop, station)}에 올려요!`,
+        target: () => this.kitchen.binRect(bin),
+        wait: "add",
+        boxAt: "top",
+        boxSide: side,
+      },
+      {
+        text: `끓는 중이에요. 칸 위 막대가 초록색 '완벽' 구간에 들어오면 ${D.stationTitle(s.shop, station)}을 탭해서 한 그릇 덜어요! (너무 오래 두면 졸아서 완벽이 아니게 돼요)`,
+        target: () => this.stationRect(station),
+        wait: "takeout",
+        boxAt: "top",
+        boxSide: side,
+      },
+      {
+        text: "완성된 그릇이 완성 칸에 놓였어요. 그릇을 탭하면 기다리는 손님에게 바로 가요!",
+        target: () => (this.tutSlot >= 0 ? this.kitchen.trayRect(this.tutSlot) : null),
+        wait: "serve",
+        boxAt: "top",
+        boxSide: side,
+      },
+      {
+        text: "잘했어요, 사장님! 주문을 보고 만들어서 내면 돼요. 손님 말풍선 아래 인내심 막대가 다 줄기 전에 서빙하고, 완벽하게 만들수록 별점이 올라가요. 단골은 완벽한 요리에 기분 좋게 팁도 줘요!",
+        next: "영업 계속!",
+        done: () => GameState.setTutorial(""),
+      },
+    ];
+    return new Tutorial(this, steps, () => {
+      s.frozen = false;
+    });
   }
 
   private startClosing(): void {
@@ -299,7 +442,8 @@ export class ShiftView extends Scene {
   }
 
   onBack(): void {
-    if (this.game.paused) this.resumeGame();
+    if (this.buyPanel !== null) this.closeBuyPanel();
+    else if (this.game.paused) this.resumeGame();
     else this.pauseGame();
   }
 
@@ -379,6 +523,7 @@ export class ShiftView extends Scene {
     }
     const menu = k.binAt(p);
     if (menu !== "") return { kind: "bin", menu };
+    if (k.powderRect().hasPoint(p)) return { kind: "powder" };
     const seat = this.seatAt(p);
     if (seat >= 0) return { kind: "customer", seat };
     return {};
@@ -413,6 +558,9 @@ export class ShiftView extends Scene {
         break;
       case "bin":
         this.tapBin(pd.menu!);
+        break;
+      case "powder":
+        this.tapPowder();
         break;
       case "customer": {
         const seat = pd.seat!;
@@ -472,6 +620,11 @@ export class ShiftView extends Scene {
       case "to_board":
         this.qualityPopup(pos, res.quality ?? 0);
         if (action === "to_board") this.kitchen.popBoard();
+        else Sound.playSfx("plate");
+        if (action === "take_out" && res.slot !== undefined) {
+          this.tutSlot = res.slot;
+          this.tut?.onEvent("takeout");
+        }
         break;
       case "blocked":
         if (res.reason === "board") {
@@ -504,14 +657,42 @@ export class ShiftView extends Scene {
     return `${D.menuName(menu)} 그릇 ${D.TRAY_PER_MENU}개가 다 찼어요! 먼저 서빙하세요`;
   }
 
+  /** 마법의 가루 통: 준비 ↔ 취소 (없으면 어디서 사는지 안내) */
+  private tapPowder(): void {
+    const s = this.session;
+    if (s.powder <= 0) {
+      this.hud.toast(`마법의 가루가 없어요 · 지도의 '장보기'에서 ${D.formatWon(D.POWDER_PRICE)}에 살 수 있어요`, rgb(0.9, 0.75, 1.0));
+      Sound.playSfx("denied");
+      return;
+    }
+    if (s.armPowder()) {
+      this.hud.toast("✨ 가루 준비! 다음에 올리는 재료에 뿌려요 (빨리 익고 끝까지 완벽, 손님이 값을 2배로!)", rgb(0.9, 0.75, 1.0));
+      Sound.playSfx("magic");
+    } else {
+      this.hud.toast("가루 뿌리기를 취소했어요");
+      Sound.playSfx("tap");
+    }
+  }
+
   private tapBin(menu: string): void {
     const s = this.session;
     if (!s.menuPool.includes(menu)) {
       this.hud.toast(`${D.menuName(menu)} — ${D.levelName(D.menuUnlockLevel(menu))}에 열려요`);
       return;
     }
+    const usedBefore = s.powderUsed;
     const idx = s.addIngredient(menu);
     const station = D.menuStation(menu);
+    if (s.powderUsed > usedBefore) {
+      this.hud.toast(`✨ ${D.menuName(menu)}에 마법의 가루를 뿌렸어요!`, rgb(0.9, 0.75, 1.0));
+      Sound.playSfx("magic");
+    }
+    if (idx === -2) {
+      // 품절: 그 자리에서 재료 사기 창
+      Sound.playSfx("denied");
+      this.openBuyPanel(menu);
+      return;
+    }
     if (idx < 0) {
       const busy = D.STATIONS[station]?.busy ?? "";
       this.hud.toast(busy !== "" ? busy : `${D.stationTitle(s.shop, station)}에 빈자리가 없어요`, rgb(1, 0.6, 0.5));
@@ -519,6 +700,7 @@ export class ShiftView extends Scene {
       return;
     }
     this.kitchen.popBin(menu);
+    this.tut?.onEvent("add");
     if (station === D.STATION_BOARD) {
       this.kitchen.popBoard();
       Sound.playSfx("chop");
@@ -543,7 +725,9 @@ export class ShiftView extends Scene {
         // 손님에게 직접 끌어다 놓아도 된다 (탭하면 자동으로 나감)
         const seat = this.seatAt(p);
         if (seat < 0) return;
-        this.afterServe(this.session.serve(slot, seat));
+        const sr = this.session.serve(slot, seat);
+        sr.seat = seat;
+        this.afterServe(sr);
         break;
       }
       case "station":
@@ -568,19 +752,29 @@ export class ShiftView extends Scene {
       Sound.playSfx("denied");
       return;
     }
-    if (res.result !== "reject") ServeFly.spawn(this.fxLayer, menu, quality, from, v(this.seatX(res.seat!), this.headY + 120.0));
+    if (res.result !== "reject") {
+      ServeFly.spawn(this.fxLayer, menu, quality, from, v(this.seatX(res.seat!), this.headY + 120.0));
+      Sound.playSfx("serve");
+      this.tut?.onEvent("serve");
+    }
     this.afterServe(res);
   }
 
   /** 서빙 결과 안내 (다른 메뉴는 손님이 안 받음, 덜 익은 음식은 화내며 떠남, 탄 음식은 투덜대며 받고 값은 반만) */
   private afterServe(res: ServeResult): void {
+    if (res.magic === true) {
+      // 마법의 가루 요리: 값 2배 + 반짝이는 글자
+      const x = res.seat !== undefined ? this.seatX(res.seat) : this.vw * 0.5;
+      FloatText.spawn(this.fxLayer, v(x, this.headY - 120.0), "✨ 마법의 맛! 값 2배", rgb(0.95, 0.75, 1.0), 40, 0.15);
+      Sound.playSfx("magic");
+    }
     if (res.result === "reject") {
       if (res.reason === "wrong") this.hud.toast("주문한 메뉴가 아니에요", rgb(1, 0.6, 0.5));
       Sound.playSfx("denied");
     } else if (res.result === "angry") {
       this.hud.toast("덜 익은 음식! 손님이 화나서 떠났어요", rgb(1, 0.45, 0.4));
     } else if (res.reason === "burnt") {
-      this.hud.toast("탄 음식이라 값을 반만 받았어요 (팁 없음)", rgb(1, 0.6, 0.5));
+      this.hud.toast("탄 음식이라 값을 반만 받았어요", rgb(1, 0.6, 0.5));
     }
   }
 
@@ -592,7 +786,11 @@ export class ShiftView extends Scene {
   }
 
   private wastePopup(pos: V, cost: number): void {
-    if (cost <= 0) return;
+    Sound.playSfx("trash");
+    if (cost <= 0) {
+      FloatText.spawn(this.fxLayer, pos.add(v(0, -40)), "버렸어요", rgb(1, 0.75, 0.6), 32);
+      return;
+    }
     FloatText.spawn(this.fxLayer, pos.add(v(0, -40)), `폐기 -${D.formatWon(cost)}`, rgb(1, 0.5, 0.45), 34);
     Sound.playSfx("tap");
   }

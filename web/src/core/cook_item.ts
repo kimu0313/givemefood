@@ -2,7 +2,7 @@
 // 단계(step)마다 탭하면 다음 단계로 넘어가고(뒤집기·면 넣기·말기…), 마지막 단계에서 탭하면 꺼낸다.
 // 큰 판·솥(떡볶이 판, 순대 솥)은 한 번에 여러 그릇(portions)을 만들고, 탭할 때마다 한 그릇씩 덜어 낸다.
 
-import { MENUS, Q, type StepDef } from "./defs.ts";
+import { MAGIC_SPEED, MENUS, Q, type StepDef } from "./defs.ts";
 
 export interface TapResult {
   action: string;
@@ -18,6 +18,7 @@ export class CookItem {
   burnt = false;
   portions = 1; // 아직 덜어 내지 않은 그릇 수
   portionsMax = 1; // 처음 만든 그릇 수 (1이면 보통 음식)
+  magic = false; // 마법의 가루를 뿌림: 빨리 익고, 완벽해지면 끝까지 완벽 (타거나 불지 않음)
 
   private steps: StepDef[];
 
@@ -54,7 +55,7 @@ export class CookItem {
   }
 
   burns(): boolean {
-    return !this.isWaitStep() && Boolean(this.step().burns);
+    return !this.magic && !this.isWaitStep() && Boolean(this.step().burns);
   }
 
   /** 다 익으면 계속 완벽 (솥에서 쪄 두는 순대) */
@@ -69,7 +70,7 @@ export class CookItem {
 
   /** 완벽 구간이 지나 팁이 없는 상태 (불음·졸음). 탄 건 아님 */
   isOvercooked(): boolean {
-    return !this.burnt && !this.isWaitStep() && !this.holds() && this.stepElapsed > this.stepTime("perfect_end");
+    return !this.burnt && !this.magic && !this.isWaitStep() && !this.holds() && this.stepElapsed > this.stepTime("perfect_end");
   }
 
   /** 완벽 구간이 지난 상태의 이름 (어묵·면 = 불음, 떡볶이 = 졸음) */
@@ -87,7 +88,7 @@ export class CookItem {
   /** 반환값: 이번 tick에 막 타버렸으면 true */
   tick(delta: number): boolean {
     if (this.burnt) return false;
-    this.stepElapsed += delta;
+    this.stepElapsed += this.magic ? delta * MAGIC_SPEED : delta;
     if (this.burns() && this.stepElapsed > this.burnTime()) {
       this.burnt = true;
       return true;
@@ -100,7 +101,7 @@ export class CookItem {
     if (this.isWaitStep()) return Q.RAW;
     if (this.stepElapsed < this.stepTime("ripe")) return Q.RAW;
     if (this.stepElapsed < this.stepTime("perfect_start")) return Q.COOKED;
-    if (this.holds() || this.stepElapsed <= this.stepTime("perfect_end")) return Q.PERFECT;
+    if (this.holds() || this.magic || this.stepElapsed <= this.stepTime("perfect_end")) return Q.PERFECT;
     return this.burns() && this.stepElapsed > this.burnTime() ? Q.BURNT : Q.COOKED;
   }
 
@@ -155,7 +156,7 @@ export class CookItem {
   /** 게이지에 표시할 전체 길이(초) */
   stepSpan(): number {
     if (this.isWaitStep()) return this.stepTime("duration");
-    if (this.holds()) return this.stepTime("perfect_start") * 1.5;
+    if (this.holds() || this.magic) return this.stepTime("perfect_start") * 1.5;
     return this.stepTime("perfect_end") * 1.3;
   }
 

@@ -9,6 +9,7 @@ import { Signal } from "../core/signal.ts";
 import * as D from "../core/defs.ts";
 import type { ShiftSession } from "../core/shift_session.ts";
 import * as Ui from "../engine/ui.ts";
+import { Sound } from "../engine/audio.ts";
 import * as FoodArt from "../art/food_art.ts";
 import * as DishArt from "../art/dish_art.ts";
 import { TARP_CREAM, TARP_RED } from "../art/street_art.ts";
@@ -49,6 +50,7 @@ export interface IntroEntry {
 
 export class ShiftHud extends Node2D {
   readonly startPressed = new Signal();
+  readonly signPressed = new Signal(); // "준비 중" 팻말을 누름 → 가게 문 열기
   readonly backPressed = new Signal(); // 시작 안내의 "나중에" (미식가 이벤트: 기회를 쓰지 않고 지도로)
   readonly pausePressed = new Signal();
   readonly resumePressed = new Signal();
@@ -95,6 +97,53 @@ export class ShiftHud extends Node2D {
     se.style.top = "0";
     se.style.zIndex = "20";
     this.root.appendChild(se);
+  }
+
+  // ---------------------------------------------------------------- 팻말 (준비 중 → 영업 중)
+
+  private sign: HTMLDivElement | null = null;
+  private signText!: HTMLDivElement;
+  private signSub!: HTMLDivElement;
+
+  /**
+   * 가게 앞에 걸린 나무 팻말 (2026-11-16 사용자 "팻말을 영업 개시로 바꿔야 손님 오게").
+   * 처음엔 가운데 위에 크게 "준비 중" + "눌러서 가게 문 열기" (흔들흔들). 누르면 뒤집히며 "영업 중" → 왼쪽 위 구석으로 작게.
+   */
+  buildSign(w: number): void {
+    const sg = Ui.div("shop-sign");
+    sg.style.left = `${w * 0.5 - 220}px`;
+    const strings = Ui.div("shop-sign-strings");
+    const board = Ui.div("shop-sign-board");
+    this.signText = Ui.heading("준비 중", 66, rgb(1.0, 0.86, 0.72), rgb(0.35, 0.08, 0.04));
+    this.signSub = Ui.label("눌러서 가게 문 열기", 28, rgb(1.0, 0.93, 0.8));
+    this.signSub.classList.add("shop-sign-sub");
+    board.append(this.signText, this.signSub);
+    sg.append(strings, board);
+    sg.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!sg.classList.contains("open")) this.signPressed.emit();
+    });
+    this.root.appendChild(sg);
+    this.sign = sg;
+  }
+
+  /** 팻말 자리 (튜토리얼이 가리킴) */
+  signElement(): HTMLDivElement | null {
+    return this.sign;
+  }
+
+  /** 팻말을 뒤집어 "영업 중"으로 → 잠깐 뒤 왼쪽 위 구석으로 */
+  flipSign(): void {
+    const sg = this.sign;
+    if (sg === null || sg.classList.contains("open")) return;
+    sg.classList.add("flipping");
+    setTimeout(() => {
+      Ui.setText(this.signText, "영업 중");
+      Ui.setText(this.signSub, "어서 오세요!");
+      sg.classList.add("open");
+      sg.classList.remove("flipping");
+    }, 180);
+    setTimeout(() => sg.classList.add("corner"), 1100);
   }
 
   /** 정보 칩 하나 (어두운 나무 판) */
@@ -323,6 +372,7 @@ export class ShiftHud extends Node2D {
   }
 
   playClosing(caption: string, onDone: () => void): void {
+    Sound.playSfx("shutter");
     this.shutterCaption = caption;
     this.shutter.el.style.pointerEvents = "auto";
     this.shutter.animated = true;

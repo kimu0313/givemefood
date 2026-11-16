@@ -14,12 +14,14 @@ import { clamp } from "../engine/geom.ts";
 export interface Bowl {
   menu: string;
   quality: number;
+  magic?: boolean; // 마법의 가루를 뿌린 요리
 }
 
 export interface Cutting {
   menu: string;
   quality: number;
   taps: number;
+  magic?: boolean;
 }
 
 export interface StationTapResult extends TapResult {
@@ -63,6 +65,9 @@ export interface ShiftResult {
   regulars: string[];
   elapsed: number;
   settled?: boolean;
+  stock_left?: Record<string, number>; // 영업이 끝났을 때 남은 재료 (재료를 쓴 영업만)
+  wasted?: number; // 버린 음식 (그릇 수)
+  powder_used?: number; // 쓴 마법의 가루
 }
 
 export class ShiftSession {
@@ -118,6 +123,13 @@ export class ShiftSession {
   lives = D.ENDLESS_LIVES;
   target = 0;
   regularsServed: string[] = [];
+  stock: Record<string, number> | null = null; // 메뉴 → 남은 재료 (인분). null = 무한 (테스트·봇·미식가 이벤트)
+  wasted = 0; // 버린 음식 (그릇 수)
+  frozen = false; // 튜토리얼 설명 중: 손님 인내심이 줄지 않음
+  powder = 0; // 가진 마법의 가루 (영업 시작 때 GameState 에서 받음)
+  powderArmed = false; // 가루 통을 눌러 준비함 → 다음에 올리는 음식에 뿌림
+  powderUsed = 0;
+  opened = true; // 가게 문을 열었나 (화면은 "준비 중" 팻말로 시작해서, 팻말을 뒤집어야 손님이 온다. 테스트·봇은 처음부터 열림)
 
   setupStory(level: number, burners: number, heatScale: number, patienceMult: number, seed = 0): void {
     this.level = clamp(level, 1, D.TOTAL_LEVELS);
@@ -220,12 +232,76 @@ export class ShiftSession {
     this.lives = D.ENDLESS_LIVES;
     this.regularsServed = [];
     this.gourmet = null;
+    this.stock = null;
+    this.wasted = 0;
+    this.opened = true;
+    this.powder = 0;
+    this.powderArmed = false;
+    this.powderUsed = 0;
+  }
+
+  /** 가루 통 탭: 가루가 있으면 준비 ↔ 취소. 준비됐으면 true */
+  armPowder(): boolean {
+    if (this.powder <= 0) {
+      this.powderArmed = false;
+      return false;
+    }
+    this.powderArmed = !this.powderArmed;
+    return this.powderArmed;
+  }
+
+  /** 가루를 뿌리고 하나 씀 */
+  private usePowder(): boolean {
+    if (!this.powderArmed || this.powder <= 0) return false;
+    this.powderArmed = false;
+    this.powder -= 1;
+    this.powderUsed += 1;
+    return true;
+  }
+
+  /** 문 닫힌 채로 시작 (팻말 "준비 중"): 음식은 미리 만들 수 있고, 손님은 open() 뒤부터 */
+  closeShop(): void {
+    this.opened = false;
+  }
+
+  /** 팻말을 "영업 중"으로: 첫 손님은 FIRST_SPAWN_DELAY 뒤 */
+  open(): void {
+    if (this.opened) return;
+    this.opened = true;
+    this.spawnTimer = D.FIRST_SPAWN_DELAY;
+  }
+
+  /** 영업 중에 재료를 더 삼 (가게 창고 최대까지) */
+  addStock(menuId: string, n: number): void {
+    if (this.stock === null) return;
+    this.stock[menuId] = Math.min(D.STOCK_MAX, (this.stock[menuId] ?? 0) + n);
+  }
+
+  /** 가게에 사 둔 재료로 영업 (setup 다음에 부름). 재료가 없는 메뉴는 품절 */
+  useStock(stock: Record<string, number>): void {
+    this.stock = {};
+    for (const m of this.shop.menus) this.stock[m] = Math.max(0, Math.trunc(stock[m] ?? 0));
+  }
+
+  /** 남은 재료 (무한이면 Infinity) */
+  stockLeft(menuId: string): number {
+    return this.stock === null ? Infinity : (this.stock[menuId] ?? 0);
+  }
+
+  /** 품절: 재료도 없고 만들어 둔 것도 없음 → 손님이 주문하지 않는다 */
+  soldOut(menuId: string): boolean {
+    return this.stockLeft(menuId) <= 0 && (this.supplyCounts()[menuId] ?? 0) <= 0;
   }
 
   // ---------------------------------------------------------------- 진행
 
   update(delta: number): void {
     if (this.isOver) return;
+    if (!this.opened) {
+      // 문 열기 전: 조리만 (미리 만들어 둘 수 있음). 시간도 안 셈
+      this.tickStations(delta);
+      return;
+    }
     this.elapsed += delta;
     if (this.endless) {
       const steps = Math.floor(this.elapsed / D.ENDLESS_RAMP_EVERY);
@@ -267,6 +343,9 @@ export class ShiftSession {
       customers: this.spawned,
       regulars: [...this.regularsServed],
       elapsed: this.elapsed,
+      stock_left: this.stock === null ? undefined : { ...this.stock },
+      wasted: this.wasted,
+      powder_used: this.powderUsed,
     };
   }
 
@@ -283,13 +362,17 @@ export class ShiftSession {
 
   // ---------------------------------------------------------------- 플레이어 액션
 
-  /** 재료 탭 → 해당 조리도구의 빈 칸에 올림(도마 메뉴는 도마로). 올린 칸 번호, 자리가 없으면 -1 */
+  /** 재료 탭 → 해당 조리도구의 빈 칸에 올림(도마 메뉴는 도마로). 올린 칸 번호, 자리가 없으면 -1, 재료가 없으면 -2 */
   addIngredient(menuId: string): number {
     if (this.isOver || !this.menuPool.includes(menuId)) return -1;
+    const have = this.stockLeft(menuId);
+    if (have <= 0) return -2;
     const station = D.menuStation(menuId);
     if (station === D.STATION_BOARD) {
       if (this.cutting !== null) return -1;
       this.cutting = { menu: menuId, quality: D.Q.PERFECT, taps: 0 };
+      if (this.usePowder()) this.cutting.magic = true;
+      this.takeStock(menuId, 1);
       return 0;
     }
     const arr = this.stationArray(station);
@@ -297,12 +380,20 @@ export class ShiftSession {
       if (arr[i] === null) {
         const scale = D.stationUsesHeat(station) ? this.heatScale : 1.0;
         const item = new CookItem(menuId, scale);
-        if (D.stationIsBatch(station)) item.setBatch(this.batchSize(station));
+        // 큰 판·솥은 한 판 = 그릇 수만큼 재료 (남은 재료가 모자라면 있는 만큼만)
+        const n = D.stationIsBatch(station) ? Math.min(this.batchSize(station), have) : 1;
+        if (D.stationIsBatch(station)) item.setBatch(n);
+        if (this.usePowder()) item.magic = true;
         arr[i] = item;
+        this.takeStock(menuId, n);
         return i;
       }
     }
     return -1;
+  }
+
+  private takeStock(menuId: string, n: number): void {
+    if (this.stock !== null) this.stock[menuId] = Math.max(0, (this.stock[menuId] ?? 0) - n);
   }
 
   /** 큰 판·솥 한 번에 만드는 그릇 수 (떡볶이 판은 업그레이드로 늘어남) */
@@ -330,11 +421,11 @@ export class ShiftSession {
       }
       const left = item.isBatch() ? item.portions : 0;
       if (toBoard) {
-        this.cutting = { menu: item.menuId, quality: q, taps: 0 };
+        this.cutting = { menu: item.menuId, quality: q, taps: 0, magic: item.magic };
         return { action: "to_board", quality: q, menu: item.menuId, left };
       }
       const slot = this.freeTraySlot(item.menuId);
-      this.tray[slot] = { menu: item.menuId, quality: q };
+      this.tray[slot] = { menu: item.menuId, quality: q, magic: item.magic };
       return { action: "take_out", quality: q, slot, menu: item.menuId, left };
     }
     return item.tap();
@@ -349,7 +440,7 @@ export class ShiftSession {
     if (taps < need) return { action: "cut", taps };
     const slot = this.freeTraySlot(this.cutting.menu);
     if (slot < 0) return { action: "blocked", reason: "tray", menu: this.cutting.menu };
-    this.tray[slot] = { menu: this.cutting.menu, quality: this.cutting.quality };
+    this.tray[slot] = { menu: this.cutting.menu, quality: this.cutting.quality, magic: this.cutting.magic };
     this.cutting = null;
     return { action: "plated", slot };
   }
@@ -384,7 +475,7 @@ export class ShiftSession {
     const c = this.seats[seat]!;
     if (c instanceof GourmetLogic) return this.serveGourmet(slot, seat, c);
     const quality = bowl.quality;
-    const res = c.serve(bowl.menu, quality);
+    const res = c.serve(bowl.menu, quality, bowl.magic === true);
     const why = res.reason ?? "";
     if (res.result === "reject") {
       if (why === "wrong") this.customerReacted.emit(seat, why);
@@ -402,13 +493,16 @@ export class ShiftSession {
       this.quotaReached.emit();
     }
     if (why === "burnt") this.customerReacted.emit(seat, "burnt"); // 탄 음식: 투덜대며 받음 (값은 반만)
+    const tipLine = (tip > 0 && c.typeId === "regular") || res.magic === true; // 단골이 팁을 주며 / 마법의 맛에 감동해 한마디
+    if (res.magic === true) this.customerReacted.emit(seat, "magic");
+    else if (tipLine) this.customerReacted.emit(seat, "tip");
     if (res.result === "angry") {
       this.customerReacted.emit(seat, "raw");
       this.customerLeaves(seat, "angry", D.RAW_LEAVE_DELAY);
     } else if (res.done) {
       if (c.regularId !== "") this.regularsServed.push(c.regularId);
-      // 탄 음식에 투덜대는 손님은 대사를 다 하고 떠나도록 자리를 조금 더 비워 둔다
-      this.customerLeaves(seat, "happy", why === "burnt" ? D.RAW_LEAVE_DELAY : D.SEAT_REFILL_DELAY);
+      // 탄 음식에 투덜대거나 팁을 주며 한마디 하는 손님은 대사를 다 하고 떠나도록 자리를 조금 더 비워 둔다
+      this.customerLeaves(seat, "happy", why === "burnt" || tipLine ? D.RAW_LEAVE_DELAY : D.SEAT_REFILL_DELAY);
     }
     return res;
   }
@@ -416,7 +510,7 @@ export class ShiftSession {
   /** 미식가에게 서빙: 무엇을 받든 한마디 평가(g_*), 덜 익은 요리에도 떠나지 않음, 코스를 다 받으면 다음 코스 */
   private serveGourmet(slot: number, seat: number, c: GourmetLogic): ServeResult {
     const bowl = this.tray[slot]!;
-    const res = c.serve(bowl.menu, bowl.quality);
+    const res = c.serve(bowl.menu, bowl.quality, bowl.magic === true);
     if (res.result === "reject") {
       if (res.reason === "wrong") this.customerReacted.emit(seat, "g_wrong");
       return res;
@@ -570,6 +664,7 @@ export class ShiftSession {
   }
 
   private tickCustomers(delta: number): void {
+    if (this.frozen) return;
     for (let i = 0; i < this.seats.length; i++) {
       const c = this.seats[i];
       if (c === null) continue;
@@ -633,7 +728,7 @@ export class ShiftSession {
     for (let k = 0; k < count; k++) menus.push(this.pickMenu());
     const c = new CustomerLogic(typeId, menus, this.patienceMult);
     if (typeId === "regular") {
-      const r = D.REGULARS[this.rng.randiRange(0, D.REGULARS.length - 1)];
+      const r = this.pickRegular();
       c.regularId = r.id;
       c.line = r.lines[this.rng.randiRange(0, r.lines.length - 1)];
     } else if (typeId === "jinsang") {
@@ -657,15 +752,31 @@ export class ShiftSession {
     return this.customerTypes[this.customerTypes.length - 1];
   }
 
+  /** 이 가게에 오는 단골 중 하나 (이 가게에서 새로 만나는 단골은 REGULAR_NEW_WEIGHT 배 자주) */
+  pickRegular(): D.RegularDef {
+    const pool = D.regularsFor(this.shopId);
+    if (pool.length === 0) return D.REGULARS[0];
+    const w = (r: D.RegularDef) => (r.shop === this.shopId ? D.REGULAR_NEW_WEIGHT : 1.0);
+    let roll = this.rng.randf() * pool.reduce((n, r) => n + w(r), 0);
+    for (const r of pool) {
+      roll -= w(r);
+      if (roll <= 0.0) return r;
+    }
+    return pool[pool.length - 1];
+  }
+
   private pickMenu(): string {
+    // 품절 메뉴는 주문하지 않는다 (전부 품절이면 아무거나 — 그날은 손님이 화내며 떠남)
+    let pool = this.menuPool.filter((m) => !this.soldOut(m));
+    if (pool.length === 0) pool = this.menuPool;
     let total = 0.0;
-    for (const m of this.menuPool) total += this.menuWeight(m);
+    for (const m of pool) total += this.menuWeight(m);
     let roll = this.rng.randf() * total;
-    for (const m of this.menuPool) {
+    for (const m of pool) {
       roll -= this.menuWeight(m);
       if (roll <= 0.0) return m;
     }
-    return this.menuPool[this.menuPool.length - 1];
+    return pool[pool.length - 1];
   }
 
   private menuWeight(menuId: string): number {
@@ -695,7 +806,10 @@ export class ShiftSession {
     this.customerLeft.emit(seat, c, reason);
   }
 
+  /** 버림: 재료를 사서 쓰는 영업은 그 재료를 잃는 것으로 끝 (돈은 안 뺌), 재료가 무한인 테스트·봇은 재료값만큼 폐기 손실 */
   private addWaste(menuId: string, count = 1): number {
+    this.wasted += Math.max(1, count);
+    if (this.stock !== null) return 0;
     const cost = D.wasteCost(menuId) * Math.max(1, count);
     this.waste += cost;
     return cost;

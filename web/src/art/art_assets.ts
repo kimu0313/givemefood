@@ -34,10 +34,12 @@ export const CUSTOMER_FILES = ["guest_spiky", "guest_blueshirt", "guest_bandana"
 //   일반 손님 = 반다나 · 초록 줄무늬 폴로 · 긴 머리 소녀 · 파란 셔츠 / 급한 손님 = 손목시계 찬 무심한 소년 / 진상 = 노란 뾰족 머리
 //   단골 중 "시험 끝난 대학생" = 파란 셔츠. 취객·다른 단골(할머니·택시 기사 등)은 어울리는 그림이 없어 도형 그림 그대로
 export const CUSTOMER_SPRITES: Record<string, string[]> = {
-  normal: ["guest_bandana", "guest_polo", "guest_girl", "guest_blueshirt"],
+  // guest_girl = 단골 "카페 알바생 수아" 전용 (2026-11-16, 일반 손님에서는 뺌 — 단골인 게 티 나게)
+  normal: ["guest_bandana", "guest_polo", "guest_blueshirt"],
   hurry: ["guest_watch"],
   jinsang: ["guest_spiky"],
   "regular:student": ["guest_blueshirt"],
+  "regular:cafe": ["guest_girl"],
 };
 // 캐릭터마다 그림 속 얼굴 크기가 달라서 (2026-11-12 사용자 요청 "머리 크기는 똑같게") 얼굴로 맞춘다:
 // 잘라 낸 그림(380×640)에서 잰 [얼굴 왼쪽 x, 얼굴 오른쪽 x (볼~볼, 귀·머리카락 빼고), 눈 높이 y]

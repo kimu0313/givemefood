@@ -377,6 +377,16 @@ export class MapButton extends Node2D {
       const arrow = [v(0, -a * 1.15), v(a, 0), v(a * 0.42, 0), v(a * 0.42, a), v(-a * 0.42, a), v(-a * 0.42, 0), v(-a, 0)].map((p) => ic.add(p));
       g.polygon(arrow, WHITE);
       tc = tc.add(v(sz.y * 0.3, 0));
+    } else if (this.icon === "basket") {
+      // 장보기: 장바구니 (손잡이 + 바구니 + 줄무늬)
+      const ic = v(rad + 2.0, sz.y * 0.5 + dy);
+      g.circle(ic, sz.y * 0.34, ink.withA(0.35));
+      const a = sz.y * 0.2;
+      g.arc(ic.add(v(0, -a * 0.1)), a * 0.75, Math.PI, Math.PI * 2, WHITE, 3.5);
+      g.polygon([ic.add(v(-a * 1.05, -a * 0.1)), ic.add(v(a * 1.05, -a * 0.1)), ic.add(v(a * 0.72, a * 0.95)), ic.add(v(-a * 0.72, a * 0.95))], WHITE);
+      g.line(ic.add(v(-a * 0.3, a * 0.15)), ic.add(v(-a * 0.25, a * 0.8)), ink.withA(0.5), 2.5);
+      g.line(ic.add(v(a * 0.3, a * 0.15)), ic.add(v(a * 0.25, a * 0.8)), ink.withA(0.5), 2.5);
+      tc = tc.add(v(sz.y * 0.3, 0));
     }
     FoodArt.textOutlined(g, this.text, tc, this.fontSize, textCol, ink, 6, sz.x);
     if (this.badge) {

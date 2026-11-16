@@ -5,10 +5,13 @@ import "@fontsource/jua/400.css";
 import "@fontsource/bagel-fat-one/400.css";
 import { Game } from "./engine/game.ts";
 import { UI_CSS } from "./engine/ui.ts";
+import { TUTORIAL_CSS } from "./ui/tutorial.ts";
+import { SupplyScene } from "./ui/supply.ts";
 import * as D from "./core/defs.ts";
 import * as ArtAssets from "./art/art_assets.ts";
 import * as FoodArt from "./art/food_art.ts";
 import { GameState } from "./state/game_state.ts";
+import { Sound } from "./engine/audio.ts";
 import { TitleScene } from "./ui/title.ts";
 import { StageMap } from "./ui/stage_map.ts";
 import { StageOpenScene } from "./ui/stage_open.ts";
@@ -17,7 +20,7 @@ import { SettlementScene } from "./ui/settlement.ts";
 import { ShiftView } from "./shift/shift_view.ts";
 
 const style = document.createElement("style");
-style.textContent = UI_CSS;
+style.textContent = UI_CSS + TUTORIAL_CSS;
 document.head.appendChild(style);
 
 const params = new URLSearchParams(location.search);
@@ -29,6 +32,7 @@ game.register("title", () => new TitleScene());
 game.register("map", () => new StageMap());
 game.register("stage_open", () => new StageOpenScene());
 game.register("upgrade", () => new UpgradeScene());
+game.register("supply", () => new SupplyScene());
 game.register("settlement", () => new SettlementScene());
 game.register("shift", () => new ShiftView());
 
@@ -49,6 +53,7 @@ game.frame = (dt: number) => {
 // 캡처·테스트 도구가 쓰는 손잡이
 (window as unknown as Record<string, unknown>).__game = game;
 (window as unknown as Record<string, unknown>).__state = GameState;
+(window as unknown as Record<string, unknown>).__sound = Sound;
 
 // play.cmd 로 연 게임 창(?app=1): 게임 화면 안쪽이 딱 1280×720 이 되게 창 크기를 맞춘다 (제목 표시줄 두께는 PC마다 달라서 열고 나서 잰다)
 if (params.get("app") === "1") {
