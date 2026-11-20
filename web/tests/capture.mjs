@@ -507,11 +507,11 @@ shots.flow = async () => {
     return { bin: sc.kitchen.binCenter(0), pan: { x: pan.position.x, y: pan.position.y }, tray: sc.kitchen.trayCenter(0) };
   });
   await clickDesign(L.bin.x, L.bin.y);
-  check(await page.evaluate(() => window.__game.scene.session.stationItem("pan", 0) !== null && window.__game.scene.session.stockLeft("tteokbokki") === 7), "떡볶이 재료 탭 → 판에 올라감 (판 3그릇 = 재료 3인분)");
+  check(await page.evaluate(() => window.__game.scene.session.stationItem("pan", 0) !== null && window.__game.scene.session.stockLeft("tteokbokki") === 8), "떡볶이 재료 탭 → 판에 올라감 (판 2그릇 = 재료 2인분)");
   await step(30);
   await shot("tut_10_pan");
   await clickDesign(L.pan.x, L.pan.y);
-  check(await page.evaluate(() => window.__game.scene.session.tray[0] === null && window.__game.scene.session.stationItem("pan", 0).portions === 3), "완벽 전에 판을 누르면 안 덜림 (튜토리얼)");
+  check(await page.evaluate(() => window.__game.scene.session.tray[0] === null && window.__game.scene.session.stationItem("pan", 0).portions === 2), "완벽 전에 판을 누르면 안 덜림 (튜토리얼)");
   await step(30 * 60);
   check(await page.evaluate(() => window.__game.scene.session.stationItem("pan", 0).stepQuality() === 2), "튜토리얼 중엔 오래 둬도 완벽 그대로 (졸지 않음)");
   await clickDesign(L.pan.x, L.pan.y);

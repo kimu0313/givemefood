@@ -67,6 +67,8 @@ export const CUSTOMER_FILES = [
   "guest_longhair",
   // 2026-11-18 사용자 그림 (art_src/customers/sheet_f.png 5명 중 1·3번째만): 반창고 붙인 트레이닝 재킷 청년 · 수건 두른 웃는 아저씨
   "guest_jacket", "guest_worker",
+  // 2026-11-21 사용자 그림 (art_src/customers/apron.png, 체크무늬 바탕 → tools/cutout_checker.mjs 195 → customer_sheet): 앞치마 두른 무심한 청년
+  "guest_apron",
   // 미식가 5명 (art_src/customers/sheet_gourmets.png → tools/customer_sheet.mjs, 투명 바탕) — 미식가 스테이지에만 나옴
   "guest_critic_kang", "guest_critic_seo", "guest_critic_han", "guest_critic_hwang", "guest_critic_baek",
   // 단골 "택시 기사 박씨" (2026-11-17 사용자 일러스트 art_src/customers/taxi.png — 도형 그림 대신)
@@ -83,7 +85,7 @@ export const CUSTOMER_SPRITES: Record<string, string[]> = {
   // 단골 그림은 보통 손님 묶음에 넣지 않음 (넣으면 단골이 올 때 같은 얼굴이 화면에 둘·하루에 두 번, 2026-11-18)
   // 2026-11-18 보통 손님 = 요리사 · 후드 소년 · 땋은 머리 여학생 · 양갈래 여자아이 / 급한 손님 = 배달 기사 · 노란 모자 소년 /
   //   진상 = 담배 문 금발 · 턱 괸 교복 남학생 / 취객 = 콧수염 아저씨 (종류 그림이 그날 다 왔으면 다른 종류 그림을 빌려 씀 — pickGuestSprite)
-  normal: ["guest_chef", "guest_kid", "guest_schoolgirl", "guest_twintail", "guest_longhair"],
+  normal: ["guest_chef", "guest_kid", "guest_schoolgirl", "guest_twintail", "guest_longhair", "guest_apron"],
   hurry: ["guest_rider", "guest_capboy", "guest_jacket"],
   jinsang: ["guest_punk", "guest_uniform"],
   drunk: ["guest_mustache", "guest_worker"],
@@ -136,6 +138,7 @@ export const SPRITE_HEADS: Record<string, [number, number, number]> = {
   guest_longhair: [155, 140.6, 89], // ~95 × 84 (고개를 크게 기울임, 기울어 넓어진 폭은 덜 셈)
   guest_jacket: [244.7, 120.6, 95], // 112 × 61 = 82.6 이지만 고개를 들어 턱이 짧게 보여서, 나란히 놓고 다른 얼굴에 맞춤
   guest_worker: [175, 103, 97.6], // 112 × ~85 (크게 웃어 벌린 턱은 덜 셈)
+  guest_apron: [151, 132, 80.5], // ~90 × 72 (고개 기울임, 귀 뺌)
 };
 export const SPRITE_HEAD = 80.0; // 손님 노드 기준 얼굴 크기 √(폭 × 눈~턱) (2026-11-18 전 그림의 가운데값)
 /** 그림마다 크기 보정 (눈 높이 기준). 2026-11-18 얼굴 크기로 맞추면서 요리사 0.84 는 뺌 (얼굴 기준이면 원래 그 크기) */
@@ -143,7 +146,7 @@ export const SPRITE_SIZE_K: Record<string, number> = {};
 /** 그림 속 몸이 끝나는 높이 (잘라 낸 그림 px, 없으면 640 = 그림 끝까지). 손님을 위로 올릴 때 몸 끝이 카운터 위로 뜨지 않게 */
 export const SPRITE_BOTTOM: Record<string, number> = {
   guest_granny: 555, guest_imo: 636, guest_office: 556, guest_punk: 568, guest_rider: 485,
-  guest_mustache: 494, guest_student: 576, guest_guard: 492, guest_kid: 554, guest_uniform: 538, guest_twintail: 518, guest_longhair: 545, guest_jacket: 566, guest_worker: 504,
+  guest_mustache: 494, guest_student: 576, guest_guard: 492, guest_kid: 554, guest_uniform: 538, guest_twintail: 518, guest_longhair: 545, guest_jacket: 566, guest_worker: 504, guest_apron: 596,
   guest_critic_kang: 541, guest_critic_seo: 579, guest_critic_han: 528, guest_critic_hwang: 560, guest_critic_baek: 562, guest_taxi: 615,
 };
 /** 키 차이 (눈 높이를 이만큼 아래로) */

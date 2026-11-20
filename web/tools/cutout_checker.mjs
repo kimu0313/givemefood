@@ -7,7 +7,8 @@
 //     단색 바탕 그림은 테두리 바탕 평균색과 거의 같은(≤ 8) 큰 덩어리(≥ 300px)만 바탕
 //  4) 바탕과 맞닿은 밝고 색이 옅은 가장자리(먹선과 바탕이 섞인 픽셀)를 2번 깎음
 //  5) 여백 잘라 가로 최대 maxW 로 줄여 저장 + 밝은/어두운 바탕 미리보기(<출력>_preview.png, 확인 뒤 지울 것)
-// 실행: node tools/cutout_checker.mjs <입력.png> <출력 접두어> [가로 최대 1000]
+// 실행: node tools/cutout_checker.mjs <입력.png> <출력 접두어> [가로 최대 1000] [바탕 최소 밝기 205]
+//   (체크무늬 회색 칸이 더 어두운 그림은 밝기를 낮춤: 예) 손님 그림 apron.png 는 회색 칸 200~208 → 195)
 //   예) node tools/cutout_checker.mjs art_src/map_pocha.png public/assets/art/map/pocha 1000
 import { chromium } from "playwright-core";
 import fs from "node:fs";
@@ -15,12 +16,13 @@ import fs from "node:fs";
 const [inp, outPrefix, maxWStr] = process.argv.slice(2);
 if (!inp || !outPrefix) throw new Error("사용법: node tools/cutout_checker.mjs <입력.png> <출력 접두어> [가로 최대]");
 const maxW = Number(maxWStr ?? 1000);
+const minLight = Number(process.argv[5] ?? 205);
 const b64 = fs.readFileSync(inp).toString("base64");
 const browser = await chromium.launch({ executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true });
 try {
   const page = await browser.newPage();
   const r = await page.evaluate(
-    async ([b64, maxW]) => {
+    async ([b64, maxW, minLight]) => {
       const img = new Image();
       img.src = "data:image/png;base64," + b64;
       await img.decode();
@@ -37,7 +39,7 @@ try {
       const mn = (i) => Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]);
       const mx = (i) => Math.max(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]);
       const like = new Uint8Array(N);
-      for (let i = 0; i < N; i++) like[i] = mx(i) - mn(i) <= 12 && mn(i) >= 205 ? 1 : 0;
+      for (let i = 0; i < N; i++) like[i] = mx(i) - mn(i) <= 12 && mn(i) >= minLight ? 1 : 0;
       const bg = new Uint8Array(N);
       const flood = (starts, ok) => {
         const st = [...starts];
@@ -88,6 +90,7 @@ try {
           if (comp.length >= 60) {
             let cw = 0, cg = 0;
             for (const i of comp) { if (mn(i) >= 246) cw++; else if (mn(i) <= 240) cg++; }
+            // 체크무늬 칸 하나보다 작은 덩어리는 흰 칸뿐일 수 있음 → 흰색 거의 순백이면 바탕
             isBg = cw > comp.length * 0.15 && cg > comp.length * 0.15;
           }
         } else if (comp.length >= 300) {
@@ -138,7 +141,7 @@ try {
       pctx.drawImage(o, ow + 20, 0);
       return { webp: o.toDataURL("image/webp", 0.9), preview: p.toDataURL("image/png"), w: ow, h: oh, crop: [x0, y0, cw, ch], checker, holes };
     },
-    [b64, maxW],
+    [b64, maxW, minLight],
   );
   fs.writeFileSync(`${outPrefix}.webp`, Buffer.from(r.webp.split(",")[1], "base64"));
   fs.writeFileSync(`${outPrefix}_preview.png`, Buffer.from(r.preview.split(",")[1], "base64"));

@@ -110,7 +110,7 @@ export class UpgradeScene extends Scene {
     this.game.goto("map");
   }
 
-  /** 튜토리얼 "upgrade": 첫 장비(떡볶이 판 키우기)를 사 보고 → 지도로 (돈이 모자라면 설명만) */
+  /** 튜토리얼 "upgrade": 첫 장비(불 조절)를 사 보고 → 지도로 (돈이 모자라면 설명만) */
   private makeTutorial(): Tutorial | null {
     if (GameState.tutorial !== "upgrade") return null;
     const id = D.UPGRADE_ORDER[0];
@@ -118,7 +118,7 @@ export class UpgradeScene extends Scene {
     const steps: TutStep[] = [];
     if (nxt !== null && GameState.wallet >= nxt.cost) {
       steps.push({
-        text: `'${D.upgradeName(id, this.shopId)}'를 사 볼까요? ${nxt.desc}! 한 번에 더 많이 만들 수 있어요.`,
+        text: `'${D.upgradeName(id, this.shopId)}'${D.josa(D.upgradeName(id, this.shopId), "을", "를")} 사 볼까요? ${nxt.desc}! 음식이 완벽한 시간이 더 길어져요.`,
         target: () => elementRect(this.buyBtns[id], this),
         wait: "bought",
       });
@@ -198,7 +198,10 @@ export class UpgradeScene extends Scene {
     switch (id) {
       case "burners": {
         const shop = D.shopDef(sid);
-        if (shop.burner_upgrade_desc) return shop.burner_upgrade_desc.replace("%d", String(D.panPortions(GameState.burnerValue(sid))));
+        if (shop.burner_upgrade_desc) {
+          const pct = D.roundHalfAway(D.perfectBonusFor(shop, "", GameState.burnerValue(sid)) * 100.0);
+          return pct > 0 ? shop.burner_upgrade_desc.replace("%d", String(pct)) : "기본 완벽 구간";
+        }
         const bonus = D.roundHalfAway(D.burnerPerfectBonus(GameState.burnerValue(sid)) * 100.0);
         return bonus > 0 ? `화구 ${GameState.burnerCount(sid)}칸 · 완벽 구간 +${bonus}%` : `화구 ${GameState.burnerCount(sid)}칸`;
       }

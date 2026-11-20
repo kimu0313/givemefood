@@ -127,7 +127,7 @@ export function viewTests(ok: (cond: boolean, msg: string) => void): void {
     }
   }
   ok(all.size === ArtAssets.CUSTOMER_FILES.length && ArtAssets.CUSTOMER_FILES.every((n) => all.has(n)), `캐릭터 그림을 모두 씀 (${[...all]})`);
-  ok(same(ArtAssets.customerSpritePool("normal"), ["guest_chef", "guest_kid", "guest_schoolgirl", "guest_twintail", "guest_longhair"]) && same(ArtAssets.customerSpritePool("hurry"), ["guest_rider", "guest_capboy", "guest_jacket"]) && same(ArtAssets.customerSpritePool("jinsang"), ["guest_punk", "guest_uniform"]), "일반 = 요리사·후드 소년·땋은 머리 여학생·양갈래 여자아이·긴 머리 교복 여학생 / 급한 손님 = 배달 기사·노란 모자 소년·트레이닝 재킷 청년 / 진상 = 담배 문 금발·턱 괸 교복 남학생");
+  ok(same(ArtAssets.customerSpritePool("normal"), ["guest_chef", "guest_kid", "guest_schoolgirl", "guest_twintail", "guest_longhair", "guest_apron"]) && same(ArtAssets.customerSpritePool("hurry"), ["guest_rider", "guest_capboy", "guest_jacket"]) && same(ArtAssets.customerSpritePool("jinsang"), ["guest_punk", "guest_uniform"]), "일반 = 요리사·후드 소년·땋은 머리 여학생·양갈래 여자아이·긴 머리 교복 여학생·앞치마 청년 / 급한 손님 = 배달 기사·노란 모자 소년·트레이닝 재킷 청년 / 진상 = 담배 문 금발·턱 괸 교복 남학생");
   ok(ArtAssets.guestSpritePool("drunk").every((n) => !ArtAssets.YOUNG_SPRITES.includes(n)) && ArtAssets.guestSpritePool("drunk").length >= 4, "취객으로 빌려 쓰는 그림은 어른만");
   ok(same(ArtAssets.customerSpritePool("regular", "cafe"), ["guest_barista"]) && !ArtAssets.customerSpritePool("normal").includes("guest_barista"), "단골 수아 = 앞치마 카페 알바생 그림 (일반 손님으로는 안 나옴)");
   ok(same(ArtAssets.customerSpritePool("regular", "guard"), ["guest_guard"]) && D.REGULARS.every((r) => ArtAssets.customerSpritePool("regular", r.id).length === 1), "단골 6명 모두 캐릭터 그림 (경비 아저씨 = 초록 모자 그림)");

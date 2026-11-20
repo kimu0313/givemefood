@@ -211,11 +211,20 @@ function testSessionCapacity(): void {
   const big = new ShiftSession();
   big.setupStory(2, 4, 1.0, 1.0, 42);
   big.addIngredient("tteokbokki");
-  ok(big.stationItem("pan", 0)!.portions === D.PAN_PORTIONS + 2, `판 키우기 2단계 = 한 판 ${D.PAN_PORTIONS + 2}그릇`);
+  ok(big.stationItem("pan", 0)!.portions === D.PAN_PORTIONS && approx(big.stationItem("pan", 0)!.perfectBonus, 0.3), "포장마차 불 조절 2단계: 판은 그대로 2그릇, 완벽 구간 +30%");
   const big5 = new ShiftSession();
   big5.setupStory(2, 7, 1.0, 1.0, 42);
   big5.addIngredient("tteokbokki");
-  ok(big5.stationItem("pan", 0)!.portions === 8 && big5.burnerCount === 4, "판 키우기 5단계 = 한 판 8그릇");
+  ok(big5.stationItem("pan", 0)!.portions === 2 && approx(big5.stationItem("pan", 0)!.perfectBonus, 0.75), "불 조절 5단계: 떡볶이 판은 늘 2그릇, 완벽 구간 +75%");
+  {
+    const fr = new ShiftSession();
+    fr.setupStory(4, 5, 1.0, 1.0, 42);
+    ok(fr.addIngredient("twigim") === 0 && approx(fr.stationItem("fryer", 0)!.perfectBonus, 0.45), "포장마차 불 조절은 모든 음식 (튀김기 +45%)");
+    const bu = new ShiftSession();
+    bu.setupStory(11, 5, 1.0, 1.0, 42);
+    bu.addIngredient("ramen");
+    ok(approx(bu.stationItem("burner", 0)!.perfectBonus, 0.25), "화구 있는 가게는 그대로 (화구 위만 +25%)");
+  }
   // 화구 불 조절 (5단계 값 7): 화구 위 음식만 완벽 구간 +75%, 화구 칸은 4칸
   const ctl = new ShiftSession();
   ctl.setupStory(11, 7, 1.0, 1.0, 42);
@@ -367,14 +376,16 @@ function testSessionCuttingAndWaste(): void {
   ok(blocked.action === "blocked" && blocked.menu === "odeng", "어묵 그릇 2개가 차면 어묵을 더 못 꺼냄");
   ok(s.freeTraySlot("tteokbokki") === 0 && s.freeTraySlot("twigim") === 6, "다른 메뉴 그릇은 그대로 비어 있음");
 
-  // 떡볶이 판 3그릇 → 그릇 2개만 덜 수 있음
+  // 떡볶이 판 2그릇을 다 덜어 완성 칸 2개가 차면, 다음 판은 못 덞
   const tp = new ShiftSession();
   tp.setupStory(1, 2, 1.0, 1.0, 3);
   tp.addIngredient("tteokbokki");
   cookFor(tp, 8.0);
-  ok(tp.tapStation("pan", 0).action === "take_out" && tp.tapStation("pan", 0).action === "take_out", "떡볶이 판에서 2그릇 덜기");
+  ok(tp.tapStation("pan", 0).action === "take_out" && tp.tapStation("pan", 0).action === "take_out" && tp.stationItem("pan", 0) === null, "떡볶이 판에서 2그릇 덜면 판이 빔");
+  tp.addIngredient("tteokbokki");
+  cookFor(tp, 8.0);
   const third = tp.tapStation("pan", 0);
-  ok(third.action === "blocked" && tp.stationItem("pan", 0)!.portions === D.PAN_PORTIONS - 2, `떡볶이 그릇 2개가 차면 판에 남은 ${D.PAN_PORTIONS - 2}그릇은 그대로`);
+  ok(third.action === "blocked" && tp.stationItem("pan", 0)!.portions === D.PAN_PORTIONS, `떡볶이 그릇 2개가 차면 새 판의 ${D.PAN_PORTIONS}그릇은 그대로`);
 }
 
 function testSessionTimeout(): void {
@@ -578,7 +589,7 @@ function testShops(): void {
   ok(same(pl.map((e) => e.kind), ["broth", "pan", "steamer", "fryer"]) && pl[0].grid === 2 && !D.shopHasBurners(pocha), "골목 포장마차 조리대 = 어묵 사각틀(2×2) / 떡볶이 판 / 순대 솥 / 튀김기, 화구 없음");
   ok(D.shopToolsText(pocha) === "어묵 사각틀 4칸 · 떡볶이 판 · 순대 솥 · 튀김기 2칸 · 도마", `새 가게 조리도구 안내 문구 (${D.shopToolsText(pocha)})`);
   ok(D.shopToolsText(D.shopDef("bunsik")) === "화구 · 튀김기 3칸 · 면 삶는 냄비 2칸 · 도마", "화구 있는 가게 안내 문구");
-  ok(D.upgradeName("burners", "pocha") === "떡볶이 판 키우기" && D.upgradeDesc("burners", 1, "pocha") === `떡볶이 한 판 ${D.PAN_PORTIONS + 2}그릇`, "포장마차의 화구 추가 자리 = 떡볶이 판 키우기");
+  ok(D.upgradeName("burners", "pocha") === "불 조절" && D.upgradeDesc("burners", 1, "pocha") === "모든 음식 완벽 구간 +30%", "포장마차의 화구 추가 자리 = 불 조절 (모든 음식 완벽 구간)");
   ok(D.upgradeName("burners", "bunsik") === "화구 추가" && D.upgradeDesc("burners", 0, "bunsik") === "화구 3칸", "다른 가게는 화구 추가 그대로");
   ok(D.starsFor(0.0) === 1 && D.starsFor(0.5) === 3 && D.starsFor(0.75) === 4 && D.starsFor(1.0) === D.MAX_STARS && D.MAX_STARS === 5, "별점 1~5개 (5개 만점)");
   ok(D.LEVEL_CUSTOMERS.length === D.TOTAL_LEVELS, "손님 수 표 길이 = 전체 레벨 수");
@@ -603,7 +614,7 @@ function testShops(): void {
   }
   ok([1, 2, 3, 4, 5].map((n) => D.burnersFor(D.UPGRADES.burners.levels[n - 1].value)).join() === "3,4,4,4,4", "화구 칸은 4칸까지 (그 뒤 단계는 불 조절)");
   ok([3, 4, 5].map((n) => D.burnerPerfectBonus(D.UPGRADES.burners.levels[n - 1].value)).join() === "0.25,0.5,0.75", "3~5단계 불 조절 = 완벽 구간 +25% / +50% / +75%");
-  ok(D.upgradeDesc("burners", 4, "pocha") === "떡볶이 한 판 8그릇" && D.upgradeDesc("burners", 4, "bunsik") === "불 조절: 완벽 구간 +75%", "5단계: 떡볶이 판 8그릇 / 화구 불 조절 +75%");
+  ok(D.upgradeDesc("burners", 4, "pocha") === "모든 음식 완벽 구간 +75%" && D.upgradeDesc("burners", 4, "bunsik") === "불 조절: 완벽 구간 +75%", "5단계: 포장마차 모든 음식 +75% / 화구 불 조절 +75%");
   ok(D.migrateUpgradeLevel("heat", 1) === 2 && D.migrateUpgradeLevel("heat", 2) === 4 && D.migrateUpgradeLevel("stove", 1) === 3 && D.migrateUpgradeLevel("burners", 2) === 2, "옛 단계 → 같은 효과 단계");
   ok(approx(D.UPGRADES.heat.levels[1].value, 0.15) && approx(D.UPGRADES.heat.levels[3].value, 0.3) && approx(D.UPGRADES.stove.levels[2].value, 0.2), "옛 효과(-15%·-30%·+20%)가 새 표에 그대로");
 }
@@ -692,7 +703,7 @@ function testGameState(): void {
   gs.level = 7;
   gs.wallet = 100000;
   ok(gs.buyUpgrade("burners", "pocha") && gs.burnerCount("pocha") === 3, "포장마차 떡볶이 판 키우기 (화구 추가 자리)");
-  ok(gs.nextUpgrade("burners", "pocha")!.desc === `떡볶이 한 판 ${D.PAN_PORTIONS + 2}그릇`, "다음 판 키우기 설명");
+  ok(gs.nextUpgrade("burners", "pocha")!.desc === "모든 음식 완벽 구간 +30%", "다음 불 조절 설명");
   gs.recordResult(result(7, true, 80000, 2));
   gs.settle(false, false);
   ok(gs.level === 7 && gs.justOpened === "" && gs.justShopCleared === "pocha" && !gs.shopOpened("bunsik"), "스테이지 7 클리어해도 분식집은 저절로 안 열림");

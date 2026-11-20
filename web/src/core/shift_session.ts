@@ -432,7 +432,7 @@ export class ShiftSession {
         // 큰 판·솥은 한 판 = 그릇 수만큼 재료 (남은 재료가 모자라면 있는 만큼만)
         const n = D.stationIsBatch(station) ? Math.min(this.batchSize(station), have) : 1;
         if (D.stationIsBatch(station)) item.setBatch(n);
-        if (station === D.STATION_BURNER) item.perfectBonus = this.burnerPerfectBonus;
+        item.perfectBonus = D.perfectBonusFor(this.shop, station, this.burnerValue); // 불 조절 업그레이드
         if (this.usePowder()) item.magic = true;
         arr[i] = item;
         this.takeStock(menuId, n);

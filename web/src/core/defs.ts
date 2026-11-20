@@ -72,7 +72,7 @@ export const STATIONS: Record<string, StationKindDef> = {
 export const BURNT_COLOR = rgb(0.16, 0.11, 0.09);
 
 // 떡볶이 판·순대 솥 한 번에 만드는 그릇 수. 떡볶이 판은 "판 키우기" 업그레이드(화구 추가 자리)로 1그릇씩 늘어난다
-export const PAN_PORTIONS = 3; // 떡볶이 한 판 (2026-11-16 사용자 "떡볶이 한 번 조리할 때 3인분", 판 키우기 5단계로 4 → 8, 2026-11-18)
+export const PAN_PORTIONS = 2; // 떡볶이 한 판 = 늘 2그릇 (2026-11-21 사용자 "2판을 최대로, 그쪽 업그레이드는 완벽 범위가 늘어나는 걸로" — 판 키우기 없앰)
 export const STEAMER_PORTIONS = 4;
 
 export interface StationSpot {
@@ -125,7 +125,8 @@ export const SHOPS: ShopDef[] = [
       { kind: "steamer", slots: 1, title: "순대 솥", width: 1.1 },
       { kind: "fryer", slots: 2, title: "튀김기", width: 0.9 },
     ],
-    burner_upgrade: "떡볶이 판 키우기", burner_upgrade_desc: "떡볶이 한 판 %d그릇",
+    // 화구가 없는 가게의 "화구 추가" 자리 = 불 조절: 모든 음식의 완벽 구간이 길어짐 (2026-11-21, 예전 "떡볶이 판 키우기")
+    burner_upgrade: "불 조절", burner_upgrade_desc: "모든 음식 완벽 구간 +%d%",
     menus: ["tteokbokki", "sundae", "odeng", "twigim"],
     upgrade_mult: 1.0, comfort: "난로 설치", comfort_none: "난로 없음",
     color: rgb(0.84, 0.29, 0.19), sky: rgb(0.05, 0.06, 0.12),
@@ -1073,9 +1074,21 @@ export function stationIsBatch(kind: string): boolean {
   return STATIONS[kind]?.batch ?? false;
 }
 
-/** 떡볶이 판 한 판 그릇 수 (화구 추가 자리의 "판 키우기" 업그레이드 단계 = burners - 2) */
-export function panPortions(burners: number): number {
-  return PAN_PORTIONS + Math.max(0, burners - BASE_BURNERS);
+/** 떡볶이 판 한 판 그릇 수 = 늘 PAN_PORTIONS (2026-11-21 판 키우기 없앰, 인자는 예전 호출 호환용) */
+export function panPortions(_burners: number): number {
+  return PAN_PORTIONS;
+}
+
+/** 화구가 없는 가게(burner_upgrade)의 "불 조절" 한 단계 = 모든 음식 완벽 구간 +15% (5단계 +75%) */
+export const SHOP_CONTROL_STEP = 0.15;
+
+/**
+ * 그 가게에서 그 도구에 올린 음식의 완벽 구간 늘림 비율 (화구 업그레이드 단계 값 v = 2..7):
+ * 화구 없는 가게(골목 포장마차) = 모든 도구 (v − 2) × 15% · 화구 있는 가게 = 화구 위 음식만, 화구 4칸 다음부터 (v − 4) × 25%
+ */
+export function perfectBonusFor(shop: ShopDef, station: string, value: number): number {
+  if (shop.burner_upgrade) return Math.max(0, Math.trunc(value) - BASE_BURNERS) * SHOP_CONTROL_STEP;
+  return station === STATION_BURNER ? burnerPerfectBonus(value) : 0;
 }
 
 // ---------------------------------------------------------------- 레벨
@@ -1203,12 +1216,12 @@ export function upgradeName(id: string, shopId: string): string {
   return UPGRADES[id].name;
 }
 
-/** 업그레이드 단계 설명 (화구가 없는 가게의 "화구 추가" 자리는 떡볶이 판 키우기) */
+/** 업그레이드 단계 설명 (화구가 없는 가게의 "화구 추가" 자리는 불 조절 = 모든 음식 완벽 구간) */
 export function upgradeDesc(id: string, levelIndex: number, shopId: string): string {
   const shop = shopDef(shopId);
   if (id === "burners" && shop.burner_upgrade_desc) {
-    const burners = UPGRADES[id].levels[levelIndex].value;
-    return shop.burner_upgrade_desc.replace("%d", String(panPortions(burners)));
+    const v = UPGRADES[id].levels[levelIndex].value;
+    return shop.burner_upgrade_desc.replace("%d", String(roundHalfAway(perfectBonusFor(shop, "", v) * 100)));
   }
   return UPGRADES[id].levels[levelIndex].desc;
 }
