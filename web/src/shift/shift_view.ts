@@ -148,7 +148,12 @@ export class ShiftView extends Scene {
     this.hud.buildSign(this.vw);
     this.hud.signPressed.connect(() => this.openShop());
     this.hud.updateStats(s);
-    this.showIntro();
+    if (s.event && GameState.eventFromComic) {
+      // 미식가 만화를 보고 들어옴 (2026-11-21 사용자 "만화 컷 지나고 뜨는 UI 없애 줘, 계속하기 누르면 가게에 바로 미식가가 오게"):
+      // 안내 창·"준비 중" 팻말 없이 바로 영업 시작 (여기서 기회를 씀) → 미식가가 FIRST_SPAWN_DELAY 뒤 들어옴
+      GameState.eventFromComic = false;
+      this.startEventNow();
+    } else this.showIntro();
     Sound.playBgm(s.event ? "event" : "shift");
     if (s.shop.rain) Sound.playSfx("rain");
   }
@@ -322,6 +327,7 @@ export class ShiftView extends Scene {
 
   process(dt: number): void {
     if (this.phase === Phase.RUNNING) this.session.update(dt);
+    this.holdTutorialPerfect();
     this.hud.updateStats(this.session);
     this.tut?.update();
   }
@@ -374,9 +380,21 @@ export class ShiftView extends Scene {
     if (this.tut === null) this.hud.toast("준비가 되면 '준비 중' 팻말을 눌러 가게 문을 열어요! (미리 만들어 둬도 돼요)", rgb(1.0, 0.9, 0.6));
   }
 
+  /** 미식가 만화 다음: 안내 창 없이 곧장 가게 문을 열고 미식가를 맞음 */
+  private startEventNow(): void {
+    GameState.startEvent(this.session.shopId); // 여기서 기회를 쓴다
+    this.phase = Phase.RUNNING;
+    this.hud.setPriceVisible(false);
+    this.session.open();
+    this.hud.flipSign();
+    Sound.playSfx("open");
+  }
+
   /** 팻말을 "영업 중"으로 뒤집어 손님을 받기 시작 (캡처 도구도 부름) */
   openShop(): void {
     if (this.phase !== Phase.RUNNING || this.session.opened) return;
+    // 튜토리얼 중에는 마지막 단계(팻말)에서만 문을 엶 — 그 전엔 손님이 오지 않게 (2026-11-21)
+    if (this.tut?.active() && GameState.tutorial === "cook" && !this.tutAtSign()) return;
     this.session.open();
     this.hud.flipSign();
     Sound.playSfx("open");
@@ -526,6 +544,26 @@ export class ShiftView extends Scene {
   private tut: Tutorial | null = null;
   private tutSlot = -1; // 방금 덜어 낸 그릇 칸
 
+  /** 튜토리얼 "덜기" 단계: 조리 중인 음식이 완벽 구간을 넘지 않게 붙잡아 둠 (완벽일 때만 꺼낼 수 있으니 졸아 버리면 막힘) */
+  private holdTutorialPerfect(): void {
+    // 덜기 단계부터 튜토리얼이 끝날 때까지 (남은 판도 설명 듣는 동안 졸지 않게)
+    if (!(this.tut?.active() && GameState.tutorial === "cook") || this.tut.waiting() === "add") return;
+    const s = this.session;
+    for (const st of s.stationKinds()) {
+      for (let i = 0; i < s.stationCapacity(st); i++) {
+        const it = s.stationItem(st, i);
+        if (it === null || it.isWaitStep() || it.burnt) continue;
+        const end = it.stepTime("perfect_end");
+        if (end > 0 && it.stepElapsed > end - 0.4) it.stepElapsed = end - 0.4;
+      }
+    }
+  }
+
+  /** 튜토리얼이 팻말을 가리키는 마지막 단계인지 */
+  private tutAtSign(): boolean {
+    return this.tut?.waiting() === "open";
+  }
+
   private stationRect(station: string): R | null {
     const sv = this.stationViews.find((k) => k.station === station);
     if (sv === undefined) return null;
@@ -541,38 +579,40 @@ export class ShiftView extends Scene {
     const station = D.menuStation(menu);
     const bin = this.kitchen.binMenus().indexOf(menu);
     s.frozen = true; // 설명하는 동안 손님은 기다려 준다
-    // 튜토리얼 이모는 손님이 없는 쪽 구석에 (왼쪽 자리에 손님이 있으면 오른쪽, 아니면 왼쪽)
-    const side = (): "left" | "right" => (s.seats[0] !== null ? "right" : "left");
+    // 2026-11-21 사용자 "이모 튜토리얼이 끝나야만 손님이 오게": 손님 없이 먼저 만드는 법을 배우고, 마지막에 팻말을 눌러 문을 열면
+    // 튜토리얼이 끝나고 그때부터 손님이 온다 (팻말은 그 단계 전에는 못 누름 — 튜토리얼 덮개가 가린 곳만 눌림)
+    const side = (): "left" | "right" => "left";
     const steps: TutStep[] = [
       {
-        text: "가게 문을 열어야 손님이 와요! 위에 걸린 '준비 중' 팻말을 눌러서 '영업 중'으로 바꿔요. (문 열기 전에 미리 만들어 둬도 돼요)",
-        target: () => {
-          const el = this.hud.signElement();
-          return el !== null ? elementRect(el, this) : null;
-        },
-        wait: "open",
-      },
-      {
-        text: `손님이 오면 머리 옆 말풍선에 주문이 떠요. 아래 ${D.menuName(menu)} 재료통을 탭해서 ${D.stationTitle(s.shop, station)}에 올려요!`,
+        text: `손님이 오기 전에 미리 만들어 둘 수 있어요. 아래 ${D.menuName(menu)} 재료통을 탭해서 ${D.stationTitle(s.shop, station)}에 올려요!`,
         target: () => this.kitchen.binRect(bin),
         wait: "add",
         boxSide: side,
       },
       {
-        text: `끓는 중이에요. 칸 위 막대가 초록색 '완벽' 구간에 들어오면 ${D.stationTitle(s.shop, station)}을 탭해서 한 그릇 덜어요! (너무 오래 두면 졸아서 완벽이 아니게 돼요)`,
+        text: `끓는 중이에요. 칸 위 막대가 초록색 '완벽' 구간에 들어올 때까지 기다렸다가, 완벽해지면 ${D.stationTitle(s.shop, station)}을 탭해서 한 그릇 덜어요! (영업 중엔 너무 오래 두면 졸아서 완벽이 아니게 돼요)`,
         target: () => this.stationRect(station),
         wait: "takeout",
         boxSide: side,
       },
       {
-        text: "완성된 그릇이 완성 칸에 놓였어요. 그릇을 탭하면 기다리는 손님에게 바로 가요!",
+        text: "완성된 그릇이 완성 칸에 놓였어요. 손님이 오면 머리 옆 말풍선에 주문이 떠요. 그때 그릇을 탭하면 그 손님에게 바로 가요!",
         target: () => (this.tutSlot >= 0 ? this.kitchen.trayRect(this.tutSlot) : null),
-        wait: "serve",
+        next: "알겠어요!",
         boxSide: side,
       },
       {
-        text: "잘했어요, 사장님! 주문을 보고 만들어서 내면 돼요. 손님 말풍선 아래 인내심 막대가 다 줄기 전에 서빙하고, 완벽하게 만들수록 별점이 올라가요. 단골은 완벽한 요리에 기분 좋게 팁도 줘요!",
-        next: "영업 계속!",
+        text: "손님 말풍선 아래 인내심 막대가 다 줄기 전에 서빙하고, 완벽하게 만들수록 별점이 올라가요. 단골은 완벽한 요리에 기분 좋게 팁도 줘요!",
+        next: "좋아요!",
+        boxSide: side,
+      },
+      {
+        text: "준비 끝! 이제 위에 걸린 '준비 중' 팻말을 눌러서 '영업 중'으로 바꿔요. 문을 열면 손님이 와요. 힘내요, 사장님!",
+        target: () => {
+          const el = this.hud.signElement();
+          return el !== null ? elementRect(el, this) : null;
+        },
+        wait: "open",
         done: () => GameState.setTutorial(""),
       },
     ];
@@ -797,6 +837,15 @@ export class ShiftView extends Scene {
     if (sv.isLocked()) {
       this.hud.toast(sv.lockedNote.replace(/\n/g, " "));
       return;
+    }
+    // 튜토리얼 "덜기" 단계: 완벽 구간일 때만 꺼냄 (2026-11-21 사용자 "튜토리얼에 떡볶이가 완벽할 때 꺼내게")
+    if (this.tut?.waiting() === "takeout") {
+      const item = this.session.stationItem(sv.station, this.pending.index!);
+      if (item !== null && item.stepQuality() !== D.Q.PERFECT) {
+        this.hud.toast("아직이에요! 막대가 초록색 '완벽'에 들어오면 탭해요", rgb(1.0, 0.85, 0.5));
+        Sound.playSfx("denied");
+        return;
+      }
     }
     const res = this.session.tapStation(sv.station, this.pending.index!);
     const pos = sv.toGlobal(sv.slotCenter(sub));

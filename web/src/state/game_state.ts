@@ -113,6 +113,8 @@ export class GameStateClass {
   mapShop = ""; // 지도에서 보고 있는 가게 (비어 있으면 가장 최근에 열린 가게)
   endlessShop = "pocha"; // 무한 영업할 가게
   eventShop = ""; // 미식가 이벤트를 할 가게 (mode = "event")
+  /** 미식가 만화를 보고 바로 들어옴 → 영업 안내 창 없이 곧장 시작 (저장 안 함, 2026-11-21) */
+  eventFromComic = false;
   lastResult: ShiftResult | null = null;
   justCleared = false; // 이번 정산으로 마지막 레벨을 처음 깸
   justOpened = ""; // 방금 산 가게 id (가게 오픈 화면을 보여 줌)

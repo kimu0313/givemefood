@@ -36,10 +36,11 @@ export interface TutStep {
 
 /** HTML 요소의 설계 좌표 네모 (장면 UI 기준) */
 export function elementRect(el: HTMLElement, scene: Scene): R {
-  const k = scene.game.scale || 1;
-  const base = scene.ui.getBoundingClientRect();
+  // 화면 네모의 두 모서리를 설계 좌표로 (모바일 세로 강제 가로일 때 90° 돌아 있어도 맞게 — Game.toDesign)
   const r = el.getBoundingClientRect();
-  return new R((r.left - base.left) / k, (r.top - base.top) / k, r.width / k, r.height / k);
+  const a = scene.game.toDesign(r.left, r.top);
+  const b = scene.game.toDesign(r.right, r.bottom);
+  return new R(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
 }
 
 /** 이모 그림 (art_src/tutorial_imo.png 를 오려 낸 상반신, 520×803) */

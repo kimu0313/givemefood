@@ -95,6 +95,21 @@ export class CanvasWidget {
 
 export let game: Game | null = null;
 
+/**
+ * 모바일 기기인지 (2026-11-21 사용자 "세로 강제 회전은 모바일에서만"): 휴대폰·태블릿 브라우저만 참.
+ * 터치 화면 노트북처럼 마우스가 주 입력인 PC 는 거짓 (pointer: fine / hover 됨) — 그래서 maxTouchPoints 만으로는 판단하지 않음.
+ */
+export function isMobileDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const nav = navigator as Navigator & { userAgentData?: { mobile?: boolean } };
+  if (nav.userAgentData?.mobile === true) return true;
+  const ua = nav.userAgent ?? "";
+  if (/Android|iPhone|iPod|iPad|Mobile|Mobi|Silk|Kindle|Opera Mini|IEMobile/i.test(ua)) return true;
+  if (/Macintosh/.test(ua) && (nav.maxTouchPoints ?? 0) > 1) return true; // iPadOS (데스크톱 UA)
+  // 주 입력이 손가락이고 마우스 올리기가 없는 기기
+  return typeof matchMedia === "function" && matchMedia("(pointer: coarse) and (hover: none)").matches;
+}
+
 export class Game {
   readonly canvas: HTMLCanvasElement;
   readonly ctx: CanvasRenderingContext2D;
@@ -113,9 +128,18 @@ export class Game {
   fixedDt = 0;
   private last = 0;
   private pointers = new Map<number, { pos: V; t: number; vel: V }>();
+  /**
+   * 모바일 세로 강제 가로 (2026-11-21 사용자 "세로로 접속하면 회전 잠금과 상관없이 transform: rotate(90deg) 로 화면 전체를
+   * 가로로 꽉 차게, 터치 좌표도 맞게"): 터치 기기에서 창이 세로(높이 > 너비)면 게임 상자(#app)와 로딩 화면을 90° 돌려
+   * 가로 화면처럼 씀. 회전 잠금은 상관없음 (기기 방향 대신 창 비율로 판단). ?rotate=1 = 데스크톱에서도 세로 창이면 회전 (시험용)
+   */
+  rotated = false;
+  private host: HTMLElement;
+  private screenW = 0; // 회전할 때 화면(창) 가로 — 터치 좌표 바꿀 때 씀
 
   constructor(parent: HTMLElement) {
     game = this;
+    this.host = parent;
     this.canvas = document.createElement("canvas");
     this.canvas.className = "stage";
     parent.appendChild(this.canvas);
@@ -124,11 +148,14 @@ export class Game {
     this.uiRoot.className = "ui-root";
     parent.appendChild(this.uiRoot);
     window.addEventListener("resize", () => this.layout());
+    window.addEventListener("orientationchange", () => setTimeout(() => this.layout(), 120));
+    window.visualViewport?.addEventListener("resize", () => this.layout());
     this.bindInput();
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) this.scene?.onFocusLost();
     });
     window.addEventListener("blur", () => this.scene?.onFocusLost());
+    this.applyRotation(); // 첫 장면 전 로딩 화면도 바로 돌려 둠
   }
 
   register(name: string, f: SceneFactory): void {
@@ -168,11 +195,53 @@ export class Game {
     s.ready();
   }
 
+  /** 지금 세로 화면을 돌려 써야 하는지: 터치 기기(또는 ?rotate=1) + 창이 세로 */
+  private wantRotate(): boolean {
+    const portrait = window.innerHeight > window.innerWidth;
+    if (!portrait) return false;
+    const force = new URLSearchParams(location.search).get("rotate") === "1";
+    return force || isMobileDevice();
+  }
+
+  /** 게임 상자를 돌리거나 되돌림 (돌리면 상자 크기 = 창 높이 × 창 너비, 시계 방향 90°) */
+  private applyRotation(): void {
+    const rot = this.wantRotate();
+    const sw = window.innerWidth;
+    const sh = window.innerHeight;
+    this.rotated = rot;
+    this.screenW = sw;
+    document.documentElement.classList.toggle("rot", rot);
+    const boxes = [this.host, document.getElementById("loading")].filter((e): e is HTMLElement => e !== null);
+    for (const b of boxes) {
+      const st = b.style;
+      if (rot) {
+        st.inset = "auto";
+        st.left = `${sw}px`;
+        st.top = "0px";
+        st.width = `${sh}px`;
+        st.height = `${sw}px`;
+        st.transformOrigin = "0 0";
+        st.transform = "rotate(90deg)";
+        st.setProperty("--h", `min(${sw}px, ${(sh * 9) / 16}px)`); // 로딩 화면 16:9 틀 (돌린 상자 기준)
+      } else {
+        for (const k of ["inset", "left", "top", "width", "height", "transform-origin", "transform", "--h"]) st.removeProperty(k);
+      }
+    }
+  }
+
+  /** 화면(창) 좌표 → 게임 상자 안 좌표 (돌렸으면 되돌려서) */
+  private toLocal(clientX: number, clientY: number): [number, number] {
+    if (!this.rotated) return [clientX, clientY];
+    // 상자는 (창 너비, 0) 에서 시계 방향 90°: 상자 x = 화면 아래쪽, 상자 y = 화면 왼쪽
+    return [clientY, this.screenW - clientX];
+  }
+
   layout(): void {
     const s = this.scene;
     const vw = s ? s.vw : BASE_W;
-    const ww = window.innerWidth;
-    const wh = window.innerHeight;
+    this.applyRotation();
+    const ww = this.rotated ? window.innerHeight : window.innerWidth;
+    const wh = this.rotated ? window.innerWidth : window.innerHeight;
     this.dpr = Math.min(window.devicePixelRatio || 1, 3);
     this.scale = Math.min(ww / vw, wh / BASE_H);
     this.offX = (ww - vw * this.scale) * 0.5;
@@ -234,8 +303,17 @@ export class Game {
     ctx.restore();
   }
 
+  /** 설계 좌표 → 화면(창) 좌표 (테스트용, toDesign 의 반대) */
+  toScreen(x: number, y: number): V {
+    const lx = x * this.scale + this.offX;
+    const ly = y * this.scale + this.offY;
+    return this.rotated ? new V(this.screenW - ly, lx) : new V(lx, ly);
+  }
+
+  /** 화면(창) 좌표 → 설계 좌표 (세로 강제 가로면 회전도 되돌림) */
   toDesign(clientX: number, clientY: number): V {
-    return new V((clientX - this.offX) / this.scale, (clientY - this.offY) / this.scale);
+    const [x, y] = this.toLocal(clientX, clientY);
+    return new V((x - this.offX) / this.scale, (y - this.offY) / this.scale);
   }
 
   private bindInput(): void {

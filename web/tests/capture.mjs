@@ -326,7 +326,9 @@ const shots = {
     await page.getByRole("button", { name: "계속하기" }).click();
     await page.waitForFunction(() => window.__game.scene.constructor.name === "ShiftView");
     await page.waitForTimeout(300);
-    await shot("comic_then_shift");
+    await page.waitForTimeout(2500);
+    await shot("comic_then_shift"); // 안내 창 없이 바로 가게 · 미식가 입장
+    console.log("[comic] 바로 영업 · 미식가 입장:", await page.evaluate(() => window.__game.scene.session.opened && window.__state.eventPlayed("pocha") && !!window.__game.scene.session.gourmet));
   },
   /** 두 번째 가게 미식가 만화 (다 나온 뒤) */
   async comic_bunsik() {
@@ -495,10 +497,9 @@ shots.flow = async () => {
   check(await page.evaluate(() => window.__game.scene.phase === 1), "영업 시작 → 진행 중");
   await step(120);
   check(await page.evaluate(() => window.__game.scene.session.spawned === 0), "'준비 중' 팻말이면 손님이 안 옴");
-  await shot("tut_8b_sign");
+  // 2026-11-21: 튜토리얼 = 손님 없이 먼저 만들기 → 설명 → 마지막에 팻말 (튜토리얼이 끝나야 손님이 옴)
   await clickEl(() => window.__game.scene.hud.signElement().getBoundingClientRect().toJSON());
-  check(await page.evaluate(() => window.__game.scene.session.opened), "팻말을 누르면 '영업 중' → 문 열림");
-  await step(120);
+  check(await page.evaluate(() => !window.__game.scene.session.opened), "튜토리얼 중엔 팻말을 눌러도 문이 안 열림 (가린 곳)");
   await shot("tut_9_bin");
   const L = await page.evaluate(() => {
     const sc = window.__game.scene;
@@ -509,19 +510,28 @@ shots.flow = async () => {
   check(await page.evaluate(() => window.__game.scene.session.stationItem("pan", 0) !== null && window.__game.scene.session.stockLeft("tteokbokki") === 7), "떡볶이 재료 탭 → 판에 올라감 (판 3그릇 = 재료 3인분)");
   await step(30);
   await shot("tut_10_pan");
-  await step(8.2 * 60);
-  check(await page.evaluate(() => window.__game.scene.session.seats.some((c) => c && c.patience >= c.patienceMax - 0.01)), "설명하는 동안 손님 인내심이 안 줄어듦");
   await clickDesign(L.pan.x, L.pan.y);
-  check(await page.evaluate(() => window.__game.scene.session.tray[0] !== null), "판 탭 → 완성 칸에 한 그릇");
+  check(await page.evaluate(() => window.__game.scene.session.tray[0] === null && window.__game.scene.session.stationItem("pan", 0).portions === 3), "완벽 전에 판을 누르면 안 덜림 (튜토리얼)");
+  await step(30 * 60);
+  check(await page.evaluate(() => window.__game.scene.session.stationItem("pan", 0).stepQuality() === 2), "튜토리얼 중엔 오래 둬도 완벽 그대로 (졸지 않음)");
+  await clickDesign(L.pan.x, L.pan.y);
+  check(await page.evaluate(() => window.__game.scene.session.tray[0] !== null && window.__game.scene.session.tray[0].quality === 2), "완벽할 때 판 탭 → 완성 칸에 완벽 한 그릇");
   await step(10);
   await shot("tut_11_tray");
-  const waiting = await page.evaluate(() => window.__game.scene.session.seats.some((c) => c && c.unservedMenus().includes("tteokbokki")));
+  await page.getByText("알겠어요!").click();
+  await step(5);
+  await page.getByText("좋아요!").click();
+  await step(5);
+  check(await page.evaluate(() => window.__game.scene.session.spawned === 0), "설명이 끝날 때까지 손님이 안 옴");
+  await shot("tut_12_sign");
+  await clickEl(() => window.__game.scene.hud.signElement().getBoundingClientRect().toJSON());
+  check(await page.evaluate(() => window.__game.scene.session.opened && window.__state.tutorial === "" && !window.__game.scene.session.frozen), "마지막에 팻말 → 문 열림 · 튜토리얼 끝 · 손님 인내심 흐름");
+  await step(120);
+  check(await page.evaluate(() => window.__game.scene.session.spawned > 0), "튜토리얼이 끝난 뒤 손님이 옴");
   await clickDesign(L.tray.x, L.tray.y - 14);
   await step(10);
-  if (waiting) check(await page.evaluate(() => window.__game.scene.session.sales > 0), "그릇 탭 → 손님에게 자동 서빙, 매출이 오름");
-  await shot("tut_12_done");
-  await page.getByText("영업 계속!").click();
-  check(await page.evaluate(() => window.__state.tutorial === "" && !window.__game.scene.session.frozen), "튜토리얼 끝 → 손님 인내심 다시 흐름");
+  check(await page.evaluate(() => window.__game.scene.session.sales > 0 || !window.__game.scene.session.seats.some((c) => c && c.unservedMenus().includes("tteokbokki"))), "그릇 탭 → 손님에게 자동 서빙");
+  await shot("tut_13_customer");
   await page.locator("button[aria-label=\"일시정지\"]").click();
   check(await page.evaluate(() => window.__game.paused), "일시정지");
   await page.getByText("계속 영업하기").click();

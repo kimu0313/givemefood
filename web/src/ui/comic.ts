@@ -160,6 +160,8 @@ export class ComicScene extends Scene {
     if (this.done) return;
     this.done = true;
     Sound.stopComicAmbience();
+    // 만화 다음엔 미식가 안내 창 없이 바로 가게로 — 미식가가 곧장 들어옴 (2026-11-21 사용자)
+    GameState.eventFromComic = true;
     this.game.goto("shift");
   }
 
