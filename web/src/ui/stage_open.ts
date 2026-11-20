@@ -45,6 +45,7 @@ export class StageOpenScene extends Scene {
     art.awningH = 60.0;
     art.counterY = vs.y;
     art.theme = shop.theme;
+    art.shopId = sid;
     for (const m of shop.menus) art.menuNames.push(D.menuName(m));
     this.add(art);
     const dim = new Dim();

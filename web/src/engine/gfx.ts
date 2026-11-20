@@ -2,18 +2,26 @@
 // 그림 코드(FoodArt, DishArt, AlleyArt …)는 Godot 판과 같은 순서·좌표로 그린다.
 
 import { Color, R, TAU, V } from "./geom.ts";
+import { getLang, langFonts, onLangChange, tr } from "../i18n/i18n.ts";
 
 // 게임 글꼴 (2026-11-15 사용자 "글씨체도 너무 대충, 게임같지 않아"): 둥글고 통통한 "주아"(Jua) 를 모든 글자에,
 // 게임 이름·큰 제목·숫자는 더 굵은 "베이글 팻 원"(Bagel Fat One). 둘 다 OFL 무료 글꼴, @fontsource 로 함께 묶어 내보낸다 (main.ts).
 const FALLBACK = `"Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Noto Sans KR", "Noto Sans CJK KR", sans-serif`;
-export const FONT_STACK = `"Jua", ${FALLBACK}`;
-export const DISPLAY_STACK = `"Bagel Fat One", "Jua", ${FALLBACK}`;
+// HTML 은 CSS 변수 --lang-fonts (main.ts 가 언어마다 넣음: 일본어·중국어면 주아 다음에 그 나라 글꼴), 캔버스는 langFonts()
+export const FONT_STACK = `var(--lang-fonts, "Jua"), ${FALLBACK}`;
+export const DISPLAY_STACK = `"Bagel Fat One", var(--lang-fonts, "Jua"), ${FALLBACK}`;
+let canvasStack = `${langFonts()}, ${FALLBACK}`;
+let canvasDisplay = `"Bagel Fat One", ${langFonts()}, ${FALLBACK}`;
+onLangChange(() => {
+  canvasStack = `${langFonts()}, ${FALLBACK}`;
+  canvasDisplay = `"Bagel Fat One", ${langFonts()}, ${FALLBACK}`;
+});
 /** 캔버스 글자에서 weight 로 이 값을 넘기면 굵은 제목 글꼴 (두 글꼴 모두 굵기가 하나뿐이라 weight 를 글꼴 고르기에 쓴다) */
 export const DISPLAY = 900;
 
 export function fontCss(size: number, weight = 400): string {
   const px = Math.max(1, Math.round(size));
-  return weight >= DISPLAY ? `400 ${px}px ${DISPLAY_STACK}` : `400 ${px}px ${FONT_STACK}`;
+  return weight >= DISPLAY ? `400 ${px}px ${canvasDisplay}` : `400 ${px}px ${canvasStack}`;
 }
 
 export type Img = HTMLImageElement | HTMLCanvasElement | ImageBitmap;
@@ -177,18 +185,22 @@ export class Gfx {
    */
   text(pos: V, s: string, align: CanvasTextAlign, width: number, size: number, color: Color, weight = 400): void {
     if (color.a <= 0 || s.length === 0) return;
+    s = tr(s); // 다른 언어면 번역 (i18n)
     const c = this.ctx;
     c.font = fontCss(size, weight);
     c.textBaseline = "alphabetic";
     c.textAlign = width > 0 ? align : "left";
     const x = width > 0 ? (align === "center" ? pos.x + width * 0.5 : align === "right" ? pos.x + width : pos.x) : pos.x;
     c.fillStyle = color.css();
-    c.fillText(s, x, pos.y);
+    // 다른 언어는 한국어보다 길어지기 쉬워서 정해진 폭(width)에 맞춰 눌러 담는다
+    if (width > 0 && getLang() !== "ko") c.fillText(s, x, pos.y, width);
+    else c.fillText(s, x, pos.y);
   }
 
   /** draw_string_outline */
   textOutline(pos: V, s: string, align: CanvasTextAlign, width: number, size: number, outline: number, color: Color, weight = 400): void {
     if (color.a <= 0 || s.length === 0 || outline <= 0) return;
+    s = tr(s);
     const c = this.ctx;
     c.font = fontCss(size, weight);
     c.textBaseline = "alphabetic";
@@ -197,12 +209,13 @@ export class Gfx {
     c.lineJoin = "round";
     c.lineWidth = outline;
     c.strokeStyle = color.css();
-    c.strokeText(s, x, pos.y);
+    if (width > 0 && getLang() !== "ko") c.strokeText(s, x, pos.y, width);
+    else c.strokeText(s, x, pos.y);
   }
 
   measure(s: string, size: number, weight = 400): number {
     this.ctx.font = fontCss(size, weight);
-    return this.ctx.measureText(s).width;
+    return this.ctx.measureText(tr(s)).width;
   }
 
   /** draw_texture_rect */
@@ -227,5 +240,5 @@ export function measureText(s: string, size: number, weight = 400): number {
     measureCtx = document.createElement("canvas").getContext("2d");
   }
   measureCtx!.font = fontCss(size, weight);
-  return measureCtx!.measureText(s).width;
+  return measureCtx!.measureText(tr(s)).width;
 }

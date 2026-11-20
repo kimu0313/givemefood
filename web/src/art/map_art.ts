@@ -15,6 +15,10 @@ import * as FoodArt from "./food_art.ts";
 import * as G from "./map_geo.ts";
 import * as I from "./iso_art.ts";
 import { iso, type GRect, type Zone } from "./map_geo.ts";
+import { WORLD_IMG_H, WORLD_SCALE } from "./map_world.ts";
+
+/** 지도 배경 그림(map/world.webp)을 그릴지. 2026-11-20 사용자 "게임 스테이지 배경 없애 줘" → false (단색 바탕 + 길 띠). 그림 파일과 길 좌표는 그대로 둠 */
+export const SHOW_WORLD_IMAGE = false;
 
 // ---------------------------------------------------------------- 동네별 색
 
@@ -361,6 +365,10 @@ export class MapArt extends Node2D {
   draw(g: Gfx): void {
     if (typeof Path2D === "undefined") return;
     const L = G.layout();
+    if (G.WORLD_ART) {
+      this.drawWorld(g, L);
+      return;
+    }
     this.drawGround(g, L);
     this.drawRoad(g, L);
     this.drawSprites(g, L);
@@ -368,14 +376,94 @@ export class MapArt extends Node2D {
     this.drawDim(g, L);
   }
 
-  /** 골목 포장마차 동네엔 비, 동네 분식집 동네엔 벚꽃 잎 (화면에 보이는 구역만) */
-  private drawWeather(g: Gfx, L: G.MapLayout): void {
+  /**
+   * 그림 지도 (G.WORLD_ART): 사용자 그림 한 장(보이는 부분만 잘라 키워서) → 지나온 길·갈 길 안내선·∞ 샛길 → 가게 건물 그림
+   * → 분식집 벚꽃 잎 → 안 연 가게 어둡게. 땅·길·집·나무는 그림에 다 있다.
+   */
+  private drawWorld(g: Gfx, L: G.MapLayout): void {
+    const ctx = g.ctx;
+    if (SHOW_WORLD_IMAGE) {
+      const img = ArtAssets.worldMap();
+      if (img !== null) {
+        const k = WORLD_SCALE;
+        const sx0 = Math.max(0, Math.floor((this.viewX0 - 60) / k));
+        const sx1 = Math.min(img.width, Math.ceil((this.viewX1 + 60) / k));
+        if (sx1 > sx0) {
+          ctx.save();
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = "high";
+          ctx.drawImage(img, sx0, 0, sx1 - sx0, WORLD_IMG_H, sx0 * k, 0, (sx1 - sx0) * k, WORLD_IMG_H * k);
+          ctx.restore();
+        }
+      }
+    } else {
+      // 2026-11-20 사용자 "게임 스테이지 배경 없애 줘": 배경 그림 대신 차분한 단색 바탕 + 스테이지를 잇는 길 띠만
+      const x0 = Math.max(0, this.viewX0 - 60);
+      const x1 = Math.min(L.width, this.viewX1 + 60);
+      const grad = ctx.createLinearGradient(0, 0, 0, this.size.y);
+      grad.addColorStop(0, "#3a3550");
+      grad.addColorStop(1, "#2a2438");
+      ctx.fillStyle = grad;
+      ctx.fillRect(x0, 0, x1 - x0, this.size.y);
+      this.drawPlainRoad(g, L);
+    }
+    ctx.save();
+    this.drawGuide(g, L);
+    ctx.restore();
+    for (const z of L.zones) {
+      if (z.shop === null || !this.seen(z.bounds.x - 40, z.bounds.endX + 40)) continue;
+      this.drawBuilding(g, z);
+    }
+    if (SHOW_WORLD_IMAGE) this.drawWeather(g, L, false); // 배경이 없으면 벚꽃 잎도 안 날림
+    this.drawDim(g, L);
+  }
+
+  /** 배경 그림이 없을 때 스테이지를 잇는 길 (먹선 테두리 + 옅은 길 띠, ∞ 샛길 포함) */
+  private drawPlainRoad(g: Gfx, L: G.MapLayout): void {
+    const ctx = g.ctx;
+    const pts: V[] = [];
+    for (let s = -6; s < L.endS; s += 0.25) {
+      const [x, y] = G.pathAt(s);
+      pts.push(iso(x, y));
+    }
+    const [ex, ey] = G.pathAt(L.endS);
+    pts.push(iso(ex, ey));
+    const spurs: [V, V][] = [];
+    for (const z of L.zones) if (z.spurS >= 0) spurs.push([iso(z.spurBase[0], z.spurBase[1]), iso(z.spurEnd[0], z.spurEnd[1])]);
+    const path = () => {
+      ctx.beginPath();
+      pts.forEach((p, k) => (k === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+      for (const [a, b] of spurs) {
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+      }
+    };
+    ctx.save();
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    path();
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.lineWidth = 104;
+    ctx.translate(0, 8);
+    ctx.stroke();
+    ctx.translate(0, -8);
+    ctx.strokeStyle = "#1f1a2a";
+    ctx.lineWidth = 100;
+    ctx.stroke();
+    ctx.strokeStyle = "#5b5470";
+    ctx.lineWidth = 86;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** 골목 포장마차 동네엔 비, 동네 분식집 동네엔 벚꽃 잎 (화면에 보이는 구역만, 그림 지도는 벚꽃만) */
+  private drawWeather(g: Gfx, L: G.MapLayout, rain = true): void {
     const tt = this.t;
     for (const z of L.zones) {
       const theme = z.shop?.theme ?? "lot";
       if (!this.seen(z.x0, z.x1)) continue;
       const w = z.x1 - z.x0;
-      if (theme === "alley") {
+      if (theme === "alley" && rain) {
         const ctx = g.ctx;
         ctx.save();
         ctx.strokeStyle = "rgba(190,210,255,0.32)";
@@ -983,7 +1071,7 @@ export class MapArt extends Node2D {
     const a = sp.art;
     if (img !== null && a !== undefined) {
       if (themeOf(z).night) I.flatGlow(g, fc.add(v(0, -10)), 260, rgb(1.0, 0.7, 0.4, 0.22));
-      // 그림 속 앞 모서리를 건물 자리 앞 꼭짓점에 맞추고, 바닥 모서리가 땅 격자와 맞게 살짝 기울임 (map_geo.fitArt)
+      // 그림 속 앞 모서리를 건물 자리 앞 꼭짓점에 맞춤 (그림은 원본 그대로 — map_geo.fitArt 가 c 0 · d 1)
       const ctx = g.ctx;
       ctx.save();
       ctx.translate(fc.x, fc.y);

@@ -37,7 +37,7 @@ export function draw(g: Gfx, menuId: string, c: V, s: number, col: Color, opts: 
       donkatsu(g, c, s, col, Boolean(opts.plated));
       break;
     case "jjolmyeon":
-      jjolmyeon(g, c, s, col, Boolean(opts.pot), sliced);
+      jjolmyeon(g, c, s, col, Boolean(opts.pot), sliced, !opts.bare);
       break;
     case "tornado":
       tornado(g, c, s, col);
@@ -277,10 +277,12 @@ function donkatsu(g: Gfx, c: V, s: number, col: Color, plated: boolean): void {
 }
 
 /** 쫄면: 냄비에서는 끓는 물 속 면, 도마·그릇에서는 채소와 빨간 양념 (sliced = 비빈 뒤) */
-function jjolmyeon(g: Gfx, c: V, s: number, col: Color, inPot: boolean, mixed: boolean): void {
+function jjolmyeon(g: Gfx, c: V, s: number, col: Color, inPot: boolean, mixed: boolean, water = true): void {
   if (inPot) {
     const top = c.add(v(0, -4).mul(s));
-    FoodArt.ellipse(g, top, 60.0 * s, 28.0 * s, rgb(0.66, 0.8, 0.95));
+    if (water) FoodArt.ellipse(g, top, 60.0 * s, 28.0 * s, rgb(0.66, 0.8, 0.95));
+    // 그림 속 큰 냄비(분식집)에는 물이 그려져 있음: 물 대신 면 둘레에 옅은 그림자 (밝은 물 위에서 면이 보이게)
+    else FoodArt.ellipse(g, top.add(v(0, 3).mul(s)), 54.0 * s, 25.0 * s, rgb(0.42, 0.24, 0.1, 0.45));
     noodleNest(g, top, s, col, 44.0, 18.0);
     bubbles(g, top, s, 40.0);
     return;

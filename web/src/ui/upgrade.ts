@@ -49,6 +49,7 @@ export class UpgradeScene extends Scene {
     art.awningH = 60.0;
     art.counterY = vs.y;
     art.theme = shop.theme;
+    art.shopId = this.shopId;
     for (const m of shop.menus) art.menuNames.push(D.menuName(m));
     this.add(art);
     const dim = new Dim();
@@ -122,8 +123,11 @@ export class UpgradeScene extends Scene {
         wait: "bought",
       });
     }
+    const broke = steps.length === 0; // 돈이 없어 아직 못 삼 (처음 시작은 0원)
     steps.push({
-      text: "장비는 가게마다 따로 사요. 돈을 모아서 화력과 손님 편의시설도 키워 보세요. 이제 첫 영업을 하러 가요!",
+      text: broke
+        ? "장비를 키우면 더 많이, 더 빨리 만들 수 있어요. 지금은 돈이 없으니 영업해서 번 돈으로 사요. 장비는 가게마다 따로예요. 이제 첫 영업을 하러 가요!"
+        : "장비는 가게마다 따로 사요. 돈을 모아서 화력과 손님 편의시설도 키워 보세요. 이제 첫 영업을 하러 가요!",
       target: () => elementRect(this.backBtn, this),
       wait: "back",
       done: () => GameState.setTutorial("stage"),
@@ -194,8 +198,9 @@ export class UpgradeScene extends Scene {
     switch (id) {
       case "burners": {
         const shop = D.shopDef(sid);
-        if (shop.burner_upgrade_desc) return shop.burner_upgrade_desc.replace("%d", String(D.panPortions(GameState.burnerCount(sid))));
-        return `화구 ${GameState.burnerCount(sid)}칸`;
+        if (shop.burner_upgrade_desc) return shop.burner_upgrade_desc.replace("%d", String(D.panPortions(GameState.burnerValue(sid))));
+        const bonus = D.roundHalfAway(D.burnerPerfectBonus(GameState.burnerValue(sid)) * 100.0);
+        return bonus > 0 ? `화구 ${GameState.burnerCount(sid)}칸 · 완벽 구간 +${bonus}%` : `화구 ${GameState.burnerCount(sid)}칸`;
       }
       case "heat": {
         const pct = D.roundHalfAway((1.0 - GameState.heatScale(sid)) * 100.0);

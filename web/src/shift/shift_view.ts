@@ -4,7 +4,7 @@
 //   y   0~ 90  천막 지붕 + 상단 정보 상자(오늘 매출·할당량 / 레벨·일시정지, 무한 영업은 버틴 시간도)
 //   y  90~580  배경 + 손님 3명 (주문 말풍선은 머리 위, 말풍선 안에 인내심 게이지)
 //   y 580~700  카운터: 완성 칸 + 도마
-//   y 700~900  조리대: 가게 왼쪽 도구 / 화구 1~4 / 가게 오른쪽 도구 (80% 크기)
+//   y 700~900  조리대: 가게 왼쪽 도구 / 화구 1~4 / 가게 오른쪽 도구 (80% 크기), 양쪽 도구가 같으면 붙여서 왼쪽 + 화구 1~4
 //              골목 포장마차는 어묵 사각틀(2×2) / 떡볶이 판 / 순대 솥 / 튀김기 (shopLayout)
 //   y 900~1080 재료통(메뉴 수만큼, 최대 4개), 그릇 더미, 쓰레기통
 // 가게(스테이지)마다 배경·조리도구·메뉴가 다르다 (SHOPS).
@@ -18,12 +18,15 @@ import * as Ui from "../engine/ui.ts";
 import * as D from "../core/defs.ts";
 import { ShiftSession } from "../core/shift_session.ts";
 import type { ServeResult } from "../core/customer_logic.ts";
+import { Market, type MarketHooks } from "../ui/supply.ts";
 import { GameState } from "../state/game_state.ts";
 import { StreetArt } from "../art/street_art.ts";
 import { RainFx } from "../art/rain_fx.ts";
+import { kitchenScaleY, mapRect, mapY, shopArt, type ArtStation, type Rect4 } from "../art/shop_art.ts";
+import * as ArtAssets from "../art/art_assets.ts";
 import * as DishArt from "../art/dish_art.ts";
 import { KitchenView, BOWL_SCALE } from "./kitchen_view.ts";
-import { StationView } from "./station_view.ts";
+import { StationView, StoveFrame } from "./station_view.ts";
 import { CustomerView } from "./customer_view.ts";
 import { DragGhost } from "./drag_ghost.ts";
 import { FloatText } from "./float_text.ts";
@@ -32,14 +35,23 @@ import { Tutorial, elementRect, type TutStep } from "../ui/tutorial.ts";
 
 const BASE_W = 1920.0;
 const DRAG_THRESHOLD = 22.0;
-const STATION_SIZE = v(296, 240); // 조리 칸 원본 크기 (STATION_SCALE 배로 줄여서 배치)
-const STATION_SCALE = 0.8;
-const STATION_Y = 800.0;
-const STATION_STEP = 270.0; // 조리 칸 1개 너비 (사이 간격 포함)
-const STATION_GAP = STATION_STEP - 296.0 * 0.8; // 조리 칸 사이 간격 (화면 기준)
+// 조리대 (2026-11-16 사용자 "음식 만드는 공간 조금 넓게, 화구 4개는 일렬 말고 아래위로 붙게, 음식 크게, 조리기구 사이 간격 좁게"):
+// 카운터를 올려 조리대를 높이고, 도구들은 STATION_W 너비에 STATION_GAP 만 띄워 꽉 채운다. 화구 4칸은 2×2 한 덩어리(화로).
+// 조리도구는 원본 높이 STATION_LOCAL_H(2×2 화구 한 칸은 BURNER_LOCAL_H)로 그리고 화면 높이에 맞춰 키운다.
+const STATION_W = 1800.0; // 조리대 도구 전체 너비 (화면 기준)
+const STATION_GAP = 12.0; // 조리도구 사이 간격 (예전 33)
+const STATION_LOCAL_H = 240.0;
+const BURNER_LOCAL_H = 150.0;
+const BURNER_GAP = 8.0; // 2×2 화구 칸 사이
+const BURNER_W = 1.15; // 화구 한 칸 너비 (옆 도구 한 칸 대비)
 const SEAT_X = [480.0, 960.0, 1440.0]; // 손님 3명. 2026-11-12 사용자 요청으로 630 → 480 간격으로 붙임
 const CUSTOMER_SCALE = 1.1;
-const COUNTER_Y = 580.0;
+// 2026-11-17 사용자 "손님이 너무 안 보여, 조리대 비율을 낮춰 줘, 손님이 조금 더 전신으로": 카운터를 510 → 590 으로 내리고
+// 머리는 거의 그대로(335) 두어 손님이 가슴·허리까지 보이게 (조리대·재료 카드 줄은 그만큼 줄어듦, shop_art.ts ART_BANDS 와 맞춤)
+export const COUNTER_Y = 590.0; // 예전 580 → 510 (조리대를 넓히려고 올렸다가) → 590
+// 2026-11-17 사용자 "손님 위치를 위로 좀, 말풍선은 머리 오른쪽에" (335 → 290), 이어서 "다 위로 올려 줘, 상체 더 보이게,
+// 위 UI 가 가리면 UI 크기를 줄여서라도" (290 → 215, 위 정보 칸 86 → 64 높이). 몸이 짧게 잘린 그림은 카운터에 닿을 만큼만 (seatHeadY)
+const HEAD_ABOVE_COUNTER = 375.0; // 손님 머리 높이 = 카운터 위
 const CLOSING_DELAY = 2.0; // 영업이 끝난 뒤 "오늘 영업 끝!" 셔터가 내려오기까지 (초)
 
 const Phase = { INTRO: 0, RUNNING: 1, CLOSING: 2 } as const;
@@ -83,7 +95,7 @@ export class ShiftView extends Scene {
   phase: number = Phase.INTRO;
   x0 = 0.0; // 화면이 1920보다 넓을 때 가운데 정렬 오프셋
   counterY = COUNTER_Y;
-  headY = COUNTER_Y - 210.0;
+  headY = COUNTER_Y - HEAD_ABOVE_COUNTER;
 
   street!: StreetArt;
   rain: RainFx | null = null;
@@ -104,20 +116,24 @@ export class ShiftView extends Scene {
     const s = this.session;
     if (GameState.mode === "endless") {
       const sid = GameState.endlessShop;
-      s.setupEndless(sid, GameState.burnerCount(sid), GameState.heatScale(sid), GameState.patienceMult(sid));
+      s.setupEndless(sid, GameState.burnerValue(sid), GameState.heatScale(sid), GameState.patienceMult(sid));
       s.useStock(GameState.stockFor(sid));
+      s.useMarket(GameState.pricesFor(sid), GameState.liveRating(sid));
     } else if (GameState.mode === "event") {
-      // 미식가 코스 재료는 황 선생이 직접 골라 온다 (가게 재료를 안 씀)
+      // 미식가 코스 재료는 미식가가 직접 골라 온다 (가게 재료를 안 씀)
       const sid = GameState.eventShop;
-      s.setupEvent(sid, GameState.burnerCount(sid), GameState.heatScale(sid), GameState.patienceMult(sid));
+      s.setupEvent(sid, GameState.burnerValue(sid), GameState.heatScale(sid), GameState.patienceMult(sid));
     } else {
       const sid = D.shopForLevel(GameState.playLevel).id;
-      s.setupStory(GameState.playLevel, GameState.burnerCount(sid), GameState.heatScale(sid), GameState.patienceMult(sid));
+      s.setupStory(GameState.playLevel, GameState.burnerValue(sid), GameState.heatScale(sid), GameState.patienceMult(sid));
+      if (GameState.imoComesTo(GameState.playLevel)) s.cameo = "imo"; // 두 번째 가게 첫날: 이모가 첫 손님으로 축하하러
       s.useStock(GameState.stockFor(sid));
+      s.useMarket(GameState.pricesFor(sid), GameState.liveRating(sid));
     }
     s.customerArrived.connect((seat) => this.onCustomerArrived(seat));
     s.customerLeft.connect((seat, _c, reason) => this.onCustomerLeft(seat, reason));
     s.customerReacted.connect((seat, kind) => this.customerViews[seat]?.react(kind));
+    s.reviewed.connect((seat, rv) => this.onReviewed(seat, rv.score, rv.tag));
     s.orderChanged.connect((seat) => this.onOrderChanged(seat));
     s.itemBurnt.connect((station, index) => this.onItemBurnt(station, index));
     s.moneyEarned.connect((seat, paid, tip, quality) => this.onMoneyEarned(seat, paid, tip, quality));
@@ -156,9 +172,13 @@ export class ShiftView extends Scene {
     this.street = this.add(street);
 
     // 바깥 거리에서 영업하는 골목 포장마차만 화면 전체에 비가 온다 (실내 가게는 창밖에만)
+    // 가게 그림(사용자 그림)이 있으면 그림 속 바깥이 보이는 곳에만
+    const art = ArtAssets.shopImage(s.shopId) !== null ? shopArt(s.shopId) : null;
     if (street.theme === "alley") {
       const rain = new RainFx();
-      rain.area = new R(0, 140, this.vw, this.counterY - 140.0);
+      const ra = art?.rain;
+      const rr = art && ra ? mapRect(art, ra) : null;
+      rain.area = rr ? new R(this.x0 + rr[0], rr[1], rr[2] - rr[0], rr[3] - rr[1]) : new R(0, 140, this.vw, this.counterY - 140.0);
       rain.count = 180;
       this.rain = this.add(rain);
     }
@@ -171,19 +191,10 @@ export class ShiftView extends Scene {
     kitchen.x0 = this.x0;
     kitchen.counterY = this.counterY;
     kitchen.trayY = this.counterY + 62.0;
-    kitchen.binsY = 992.0;
+    kitchen.binsY = 1004.0;
+    kitchen.art = art;
     this.kitchen = this.add(kitchen);
-
-    // 조리대: 가게 배치(shopLayout)대로 왼쪽부터. width = 조리 칸 몇 개 너비 (떡볶이 판은 넓게)
-    const layout = D.shopLayout(s.shop);
-    const total = layout.reduce((n, e) => n + (e.width ?? 1.0), 0);
-    let x = this.x0 + BASE_W * 0.5 - total * STATION_STEP * 0.5;
-    for (const e of layout) {
-      const w = e.width ?? 1.0;
-      const local = v((w * STATION_STEP - STATION_GAP) / STATION_SCALE, STATION_SIZE.y);
-      this.addStation(e.kind, e.first, e.slots, v(x + w * STATION_STEP * 0.5, STATION_Y), e.title, local, e.grid ?? 0);
-      x += w * STATION_STEP;
-    }
+    this.buildStations();
 
     this.fxLayer = this.add(new Node2D());
 
@@ -198,19 +209,105 @@ export class ShiftView extends Scene {
     this.hud.startPressed.connect(() => this.onStart());
     this.hud.backPressed.connect(() => this.game.goto("map")); // 미식가 이벤트: 기회를 쓰지 않고 돌아감
     this.hud.pausePressed.connect(() => this.pauseGame());
+    this.hud.pricePressed.connect(() => this.openPricePanel());
     this.hud.resumePressed.connect(() => this.resumeGame());
     this.hud.quitPressed.connect(() => this.quitToTitle());
   }
 
-  private addStation(station: string, first: number, count: number, pos: V, title: string, localSize: V, grid: number): void {
+  /**
+   * 조리대: 가게 배치(shopLayout)대로 왼쪽부터, 완성 칸 아래 ~ 재료 선반 위를 꽉 채워서.
+   * 화구가 없는 가게(골목 포장마차)는 width 비율대로 나누고, 화구가 있는 가게는 옆 도구 = 칸 수만큼 너비,
+   * 화구 4칸 = 위 2 · 아래 2 로 붙인 화로 한 덩어리 (같은 종류 옆 도구는 shopLayout 에서 이미 붙어 있음).
+   */
+  private buildStations(): void {
+    const s = this.session;
+    // 가게 그림 속 조리 도구가 이 가게 도구와 같으면 (shop_art.ts kitchen) 그 자리에 놓고 틀은 그림 것을 씀
+    const artKitchen = this.kitchen.art?.kitchen ?? null;
+    if (artKitchen !== null && ArtAssets.shopImage(s.shopId) !== null && this.placeArtStations(artKitchen)) return;
+    const top = this.kitchen.kitchenTop() + 14.0;
+    const bottom = this.kitchen.shelfTop() - 5.0;
+    const h = bottom - top;
+    const cy = (top + bottom) * 0.5;
+    const layout = D.shopLayout(s.shop);
+    const others = layout.filter((e) => e.kind !== D.STATION_BURNER);
+    const hasBurners = others.length < layout.length;
+    let x = this.x0 + BASE_W * 0.5 - STATION_W * 0.5;
+    if (!hasBurners) {
+      const total = layout.reduce((n, e) => n + (e.width ?? 1.0), 0);
+      const unit = (STATION_W - STATION_GAP * (layout.length - 1)) / total;
+      for (const e of layout) {
+        const w = unit * (e.width ?? 1.0);
+        this.addStation(e.kind, e.first, e.slots, v(x + w * 0.5, cy), e.title, v(w, h), STATION_LOCAL_H, e.grid ?? 0);
+        x += w + STATION_GAP;
+      }
+      return;
+    }
+    const sideSlots = others.reduce((n, e) => n + e.slots, 0);
+    const sw = (STATION_W - STATION_GAP * others.length - BURNER_GAP) / (sideSlots + 2.0 * BURNER_W);
+    const bw = sw * BURNER_W;
+    const bh = (h - BURNER_GAP) * 0.5;
+    for (const e of layout) {
+      if (e.kind !== D.STATION_BURNER) {
+        const w = sw * e.slots;
+        this.addStation(e.kind, e.first, e.slots, v(x + w * 0.5, cy), e.title, v(w, h), STATION_LOCAL_H, e.grid ?? 0);
+        x += w + STATION_GAP;
+        continue;
+      }
+      if (e.first !== 0) continue; // 화로 한 덩어리는 화구 1 자리에서 4칸 다 놓음
+      const blockW = bw * 2.0 + BURNER_GAP;
+      const frame = new StoveFrame();
+      frame.rect = new R(x, top, blockW, h);
+      this.add(frame);
+      for (let k = 0; k < D.MAX_BURNERS; k++) {
+        const col = k % 2;
+        const row = Math.trunc(k / 2);
+        const c = v(x + col * (bw + BURNER_GAP) + bw * 0.5, top + row * (bh + BURNER_GAP) + bh * 0.5);
+        this.addStation(D.STATION_BURNER, k, 1, c, `화구 ${k + 1}`, v(bw, bh), BURNER_LOCAL_H, 0);
+      }
+      x += blockW + STATION_GAP;
+    }
+  }
+
+  /** 그림 속 도구 자리에 도구를 놓음 (배치 순서·종류가 그림과 다르면 false → 보통 배치) */
+  private placeArtStations(list: ArtStation[]): boolean {
+    const layout = D.shopLayout(this.session.shop);
+    const art = this.kitchen.art;
+    if (art === null || layout.length !== list.length || layout.some((e, i) => e.kind !== list[i].kind)) return false;
+    const ky = kitchenScaleY(art);
+    layout.forEach((e, i) => {
+      const a = list[i];
+      // 그림 좌표 → 화면 (조리대 띠는 세로로 줄어듦)
+      const [x0, y0, x1, y1] = mapRect(art, a.rect);
+      const c = v(this.x0 + (x0 + x1) * 0.5, (y0 + y1) * 0.5);
+      const sv = this.addStation(e.kind, e.first, e.slots, c, e.title, v(x1 - x0, y1 - y0), y1 - y0, e.grid ?? 0);
+      const loc = (r0: Rect4): R => {
+        const r = mapRect(art, r0);
+        return new R(this.x0 + r[0] - c.x, r[1] - c.y, r[2] - r[0], r[3] - r[1]);
+      };
+      sv.art = {
+        cells: a.cells ? a.cells.map(loc) : null,
+        pan: a.pan ? loc(a.pan) : null,
+        pot: a.pot ? [v(this.x0 + a.pot[0] - c.x, mapY(art, a.pot[1]) - c.y), v(a.pot[2], a.pot[3] * ky)] : null,
+        hasPan: a.hasPan ?? false,
+        hasPot: a.hasPot ?? false,
+      };
+      sv.refreshSteam();
+    });
+    return true;
+  }
+
+  /** screen = 화면에서 차지할 크기, localH = 그 도구를 그리는 원본 높이 (화면 높이에 맞춰 같은 비율로 키움) */
+  private addStation(station: string, first: number, count: number, pos: V, title: string, screen: V, localH: number, grid: number): StationView {
     const sv = new StationView();
-    sv.setup(this.session, station, first, count, localSize, title, grid);
+    const k = screen.y / localH;
+    sv.setup(this.session, station, first, count, v(screen.x / k, localH), title, grid);
     sv.position = pos;
-    sv.scale = v(STATION_SCALE, STATION_SCALE);
+    sv.scale = v(k, k);
     if (!this.session.stationInUse(station)) sv.lockedNote = this.stationUnlockNote(station);
     else if (station === D.STATION_BURNER && first >= this.session.burnerCount) sv.lockedNote = "화구 추가\n업그레이드";
     this.add(sv);
     this.stationViews.push(sv);
+    return sv;
   }
 
   /** 아직 쓰는 메뉴가 없는 조리도구: 처음 쓰는 메뉴와 그 날짜 */
@@ -235,10 +332,10 @@ export class ShiftView extends Scene {
     const shopName = s.shop.name;
     if (s.event) {
       const e = s.eventDef ?? D.EVENTS[0];
-      entries.push({ head: "미식가 황 선생", body: `한 번에 ${e.perRound}가지씩, 코스 ${e.rounds}번 주문해요. 코스가 지날수록 더 못 기다려요.` });
+      entries.push({ head: D.criticName(e.critic), body: `한 번에 ${e.perRound}가지씩, 코스 ${e.rounds}번 주문해요. 코스가 지날수록 더 못 기다려요.` });
       entries.push({ head: "평가", body: "완벽 3점 · 익음 1점 · 탐·덜 익음·늦음 0점\n만족도에 따라 별 1~5개" });
-      entries.push({ head: "보상", body: `별 5개면 ${D.formatWon(e.reward)} (별 하나에 ${D.formatWon(D.eventReward(e, 1))})\n요리 값과 팁(3배)은 따로 받아요` });
-      entries.push({ head: "딱 한 번!", body: "영업을 시작하면 다시 도전할 수 없어요.\n중간에 나가면 보상도 없어요." });
+      entries.push({ head: "유명세", body: `좋은 평가를 받으면 신문에 실려 가게가 유명해져요!\n손님이 몰려 매출이 최대 +${D.formatWon(e.reward)}, 가게 평점도 올라요` });
+      entries.push({ head: "딱 한 번!", body: "영업을 시작하면 다시 도전할 수 없어요.\n중간에 나가면 리뷰도 없어요." });
       this.hud.showIntro(`미식가 방문 · ${shopName}`, "까다로운 미식가가 찾아왔어요!", entries, "도전 시작!", Ui.EVENT, "나중에");
       return;
     }
@@ -273,6 +370,7 @@ export class ShiftView extends Scene {
     this.hud.hideIntro();
     this.phase = Phase.RUNNING;
     this.tut = this.makeTutorial();
+    this.hud.setPriceVisible(this.tut === null && this.priceChangeable());
     if (this.tut === null) this.hud.toast("준비가 되면 '준비 중' 팻말을 눌러 가게 문을 열어요! (미리 만들어 둬도 돼요)", rgb(1.0, 0.9, 0.6));
   }
 
@@ -290,9 +388,74 @@ export class ShiftView extends Scene {
 
   private buyPanel: HTMLDivElement | null = null;
 
-  /** 품절된 재료통을 누르면: 잠깐 멈추고 그 자리에서 재료 사기 (지갑 + 오늘 번 돈까지 — 모자란 만큼은 정산에서 갚음) */
+  /**
+   * 품절된 재료통을 누르면: 잠깐 멈추고 장보기와 같은 재료 가게 화면 (2026-11-20 사용자 "품절 재료 눌렀을 때 장보기랑 같은 화면").
+   * 이 가게 재료만 (가게 탭 없음), 품절 재료 칸이 반짝, 지갑 + 오늘 번 돈까지 쓸 수 있음 (모자란 만큼은 정산에서 갚음).
+   * 산 재료는 지금 영업에 바로 들어감. 마법의 가루도 살 수 있음 (지갑으로만). 오른쪽 위 X = 영업으로.
+   */
   private openBuyPanel(menu: string): void {
     if (this.buyPanel !== null || this.session.stock === null) return;
+    const s = this.session;
+    const sid = s.shopId;
+    this.game.paused = true;
+    this.cancelDrag();
+    const ov = Ui.overlay(this.ui, 0.8);
+    ov.style.zIndex = "30";
+    this.buyPanel = ov;
+    const budget = (): number => GameState.wallet + Math.max(0, s.revenue());
+    const hooks: MarketHooks = {
+      inShift: true,
+      have: (_sid, m) => s.stockLeft(m),
+      room: (_sid, m) => Math.max(0, D.STOCK_MAX - s.stockLeft(m)),
+      cost: (_sid, m, n) => GameState.stockCost(sid, m, n),
+      budget,
+      buy: (_sid, m, n) => {
+        const k = Math.min(n, D.STOCK_MAX - s.stockLeft(m));
+        if (k <= 0) return false;
+        const cost = GameState.stockCost(sid, m, k);
+        if (cost > budget()) return false;
+        GameState.payStock(cost);
+        s.addStock(m, k);
+        return true;
+      },
+      powder: () => s.powder,
+      buyPowder: () => {
+        if (!GameState.buyPowder()) return false;
+        s.powder += 1;
+        return true;
+      },
+      note: () => `지갑 ${D.formatWon(GameState.wallet)} + 오늘 번 돈 ${D.formatWon(Math.max(0, s.revenue()))}까지 쓸 수 있어요 · 모자란 만큼은 정산에서 갚아요`,
+    };
+    const market = new Market({
+      shopId: sid,
+      hooks,
+      tabs: false,
+      highlight: menu,
+      closeLabel: "영업으로 돌아가기",
+      onClose: () => this.closeBuyPanel(),
+      greeting: `${D.menuName(menu)} 재료가 다 떨어졌네! 얼른 담아 줄게요~`,
+    });
+    ov.appendChild(market.root);
+  }
+
+  private closeBuyPanel(): void {
+    this.buyPanel?.remove();
+    this.buyPanel = null;
+    this.game.paused = false;
+  }
+
+  // ---------------------------------------------------------------- 영업 중 가격표 (2026-11-17 사용자 "장보기 말고 영업 중인 가게에서 가격 조정")
+
+  private pricePanel: HTMLDivElement | null = null;
+
+  /** 가격을 바꿀 수 있는 영업 (가게 평점·가격이 있는 스토리·무한 영업. 미식가 이벤트는 기본 값만 냄) */
+  private priceChangeable(): boolean {
+    return this.session.ratingOn && !this.session.event;
+  }
+
+  /** 위 "가격표": 잠깐 멈추고 메뉴마다 저렴·보통·비쌈. 바꾸면 다음에 내는 그릇부터 그 값, 가게에 저장돼 다음 영업도 그대로 */
+  private openPricePanel(): void {
+    if (this.pricePanel !== null || this.buyPanel !== null || this.phase !== Phase.RUNNING || this.game.paused || !this.priceChangeable()) return;
     const s = this.session;
     const sid = s.shopId;
     this.game.paused = true;
@@ -300,48 +463,61 @@ export class ShiftView extends Scene {
     const ov = Ui.overlay(this.ui, 0.55);
     ov.classList.add("center");
     ov.style.zIndex = "30";
-    this.buyPanel = ov;
+    this.pricePanel = ov;
     const p = Ui.popPanel(Ui.PAPER, 36, 36);
-    p.style.width = "820px";
+    p.style.width = "1180px";
     ov.appendChild(p);
-    p.appendChild(Ui.ribbon("재료 사기", Ui.ACCENT, 46));
-    const col = Ui.vbox(14);
+    p.appendChild(Ui.ribbon("가격표", Ui.ACCENT, 46));
+    const col = Ui.vbox(16);
+    col.style.alignItems = "stretch";
     p.appendChild(col);
-    const pic = menuPic(menu, 300, 130);
-    pic.el.style.alignSelf = "center";
-    col.appendChild(pic.el);
-    const left = s.stockLeft(menu);
-    const unit = D.ingredientCost(menu);
-    col.appendChild(Ui.heading(`${D.menuName(menu)} 재료 ${left}인분 남음`, 40, left <= 0 ? Ui.BAD : Ui.INK, null));
-    const budget = GameState.wallet + Math.max(0, s.revenue());
-    col.appendChild(Ui.label(`1인분 ${D.formatWon(unit)} · 지갑 ${D.formatWon(GameState.wallet)} + 오늘 번 돈 ${D.formatWon(Math.max(0, s.revenue()))}까지 쓸 수 있어요`, 26, Ui.MUTED, "center", true));
-    const row = Ui.hbox(16);
-    col.appendChild(row);
-    const room = Math.max(0, D.STOCK_MAX - left);
-    for (const n of [D.STOCK_PACK, D.STOCK_PACK * 2]) {
-      const k = Math.min(n, room);
-      const b = Ui.button("", Ui.GOOD, 34, 100);
-      b.style.flex = "1 1 0";
-      Ui.withIcon(b, Ui.ICON.coin, `+${k}인분 · ${D.formatWon(k * unit)}`);
-      b.disabled = k <= 0 || budget < k * unit;
-      Ui.onPress(b, () => {
-        // 지갑에서 내고(모자라면 오늘 번 돈으로 — 지갑이 잠깐 마이너스, 정산에서 갚음) 가게 창고와 지금 영업에 함께 넣는다
-        if (!GameState.buyStock(sid, menu, k, true)) return;
-        s.addStock(menu, k);
-        Sound.playSfx("coin");
-        this.hud.toast(`${D.menuName(menu)} 재료 ${k}인분을 샀어요`, rgb(0.6, 1.0, 0.6));
-        this.closeBuyPanel();
-      });
-      row.appendChild(b);
-    }
+    const list = Ui.vbox(12);
+    list.style.alignItems = "stretch";
+    col.appendChild(list);
+    const menus = this.kitchen.binMenus().filter((m) => s.menuPool.includes(m));
+    const won = (mid: string, lv: string): number => Math.round((D.menuPrice(mid) * D.PRICE_LEVELS[lv].mult) / 10) * 10;
+    const fill = (): void => {
+      list.replaceChildren(
+        ...menus.map((mid) => {
+          const row = Ui.hbox(12);
+          row.style.alignItems = "center";
+          const pic = menuPic(mid, 150, 84);
+          row.appendChild(pic.el);
+          const name = Ui.heading(D.menuName(mid), 34, Ui.INK, null, "left");
+          name.style.flex = "0 0 190px";
+          row.appendChild(name);
+          const cur = s.priceLevel(mid);
+          for (const lv of D.PRICE_ORDER) {
+            const on = lv === cur;
+            const c = lv === "cheap" ? Ui.AD : lv === "pricey" ? Ui.BAD : Ui.SECONDARY;
+            const b = Ui.button("", on ? c : Ui.CARD, 24, 78);
+            b.replaceChildren(Ui.label(`${D.PRICE_LEVELS[lv].name} · ${D.formatWon(won(mid, lv))}`, 26, on ? Ui.CREAM : Ui.INK, "center"));
+            b.style.flex = "1 1 0";
+            b.style.padding = "4px 6px 8px";
+            if (!on) b.style.opacity = "0.85";
+            Ui.onPress(b, () => {
+              if (s.priceLevel(mid) === lv) return;
+              s.setPriceLevel(mid, lv);
+              GameState.setPrice(sid, mid, lv); // 가게에 저장 (다음 영업도 이 값)
+              Sound.playSfx("coin");
+              fill();
+            });
+            row.appendChild(b);
+          }
+          return row;
+        }),
+      );
+    };
+    fill();
+    col.appendChild(Ui.label("바꾸면 바로 적용돼요 · 비싸게 팔면 돈은 더 벌지만 손님 평가가 깐깐해져요 · 단골손님은 늘 보통 값을 내요", 24, Ui.MUTED, "center", true));
     const close = Ui.button("닫기", Ui.SECONDARY, 32, 90);
-    Ui.onPress(close, () => this.closeBuyPanel());
+    Ui.onPress(close, () => this.closePricePanel());
     col.appendChild(close);
   }
 
-  private closeBuyPanel(): void {
-    this.buyPanel?.remove();
-    this.buyPanel = null;
+  private closePricePanel(): void {
+    this.pricePanel?.remove();
+    this.pricePanel = null;
     this.game.paused = false;
   }
 
@@ -365,7 +541,7 @@ export class ShiftView extends Scene {
     const station = D.menuStation(menu);
     const bin = this.kitchen.binMenus().indexOf(menu);
     s.frozen = true; // 설명하는 동안 손님은 기다려 준다
-    // 말 창은 손님이 없는 쪽 위에 (왼쪽 자리에 손님이 있으면 오른쪽, 아니면 왼쪽)
+    // 튜토리얼 이모는 손님이 없는 쪽 구석에 (왼쪽 자리에 손님이 있으면 오른쪽, 아니면 왼쪽)
     const side = (): "left" | "right" => (s.seats[0] !== null ? "right" : "left");
     const steps: TutStep[] = [
       {
@@ -377,24 +553,21 @@ export class ShiftView extends Scene {
         wait: "open",
       },
       {
-        text: `손님이 오면 머리 위 말풍선에 주문이 떠요. 아래 ${D.menuName(menu)} 재료통을 탭해서 ${D.stationTitle(s.shop, station)}에 올려요!`,
+        text: `손님이 오면 머리 옆 말풍선에 주문이 떠요. 아래 ${D.menuName(menu)} 재료통을 탭해서 ${D.stationTitle(s.shop, station)}에 올려요!`,
         target: () => this.kitchen.binRect(bin),
         wait: "add",
-        boxAt: "top",
         boxSide: side,
       },
       {
         text: `끓는 중이에요. 칸 위 막대가 초록색 '완벽' 구간에 들어오면 ${D.stationTitle(s.shop, station)}을 탭해서 한 그릇 덜어요! (너무 오래 두면 졸아서 완벽이 아니게 돼요)`,
         target: () => this.stationRect(station),
         wait: "takeout",
-        boxAt: "top",
         boxSide: side,
       },
       {
         text: "완성된 그릇이 완성 칸에 놓였어요. 그릇을 탭하면 기다리는 손님에게 바로 가요!",
         target: () => (this.tutSlot >= 0 ? this.kitchen.trayRect(this.tutSlot) : null),
         wait: "serve",
-        boxAt: "top",
         boxSide: side,
       },
       {
@@ -405,6 +578,7 @@ export class ShiftView extends Scene {
     ];
     return new Tutorial(this, steps, () => {
       s.frozen = false;
+      this.hud.setPriceVisible(this.priceChangeable());
     });
   }
 
@@ -424,16 +598,19 @@ export class ShiftView extends Scene {
     if (this.phase !== Phase.RUNNING || this.game.paused) return;
     this.cancelDrag();
     this.game.paused = true;
+    Sound.setBgmPaused(true); // 일시정지하면 배경 음악·빗소리도 멈춤
     this.hud.showPause();
   }
 
   private resumeGame(): void {
     this.game.paused = false;
+    Sound.setBgmPaused(false);
     this.hud.hidePause();
   }
 
   private quitToTitle(): void {
     this.game.paused = false;
+    Sound.setBgmPaused(false);
     this.game.goto("title");
   }
 
@@ -443,6 +620,7 @@ export class ShiftView extends Scene {
 
   onBack(): void {
     if (this.buyPanel !== null) this.closeBuyPanel();
+    else if (this.pricePanel !== null) this.closePricePanel();
     else if (this.game.paused) this.resumeGame();
     else this.pauseGame();
   }
@@ -529,9 +707,17 @@ export class ShiftView extends Scene {
     return {};
   }
 
-  /** 손님 영역: 손님 몸 + 오른쪽 말풍선까지 */
+  /** 손님 영역: 오른쪽 주문 말풍선 먼저 (옆 손님 자리까지 뻗어 있음), 그다음 손님 몸 */
   private seatAt(p: V): number {
-    if (p.y > this.counterY + 20.0 || p.y < 100.0) return -1;
+    if (p.y > this.counterY + 20.0 || p.y < 76.0) return -1;
+    for (let i = 0; i < D.SEATS; i++) {
+      const view = this.customerViews[i];
+      if (view === null || view.leaving || this.session.seats[i] === null) continue;
+      const b = view.bubbleRect().grow(10.0);
+      const s = view.scale;
+      const r = new R(view.position.x + b.x * s.x, view.position.y + b.y * s.y, b.w * s.x, b.h * s.y);
+      if (r.hasPoint(p)) return i;
+    }
     for (let i = 0; i < D.SEATS; i++) {
       const x = this.seatX(i);
       if (p.x >= x - 230.0 && p.x <= x + 230.0 && this.session.seats[i] !== null) return i;
@@ -765,7 +951,7 @@ export class ShiftView extends Scene {
     if (res.magic === true) {
       // 마법의 가루 요리: 반짝이는 글자 (효과는 말하지 않음 — 받은 돈을 보고 알아채게)
       const x = res.seat !== undefined ? this.seatX(res.seat) : this.vw * 0.5;
-      FloatText.spawn(this.fxLayer, v(x, this.headY - 120.0), "✨ 마법의 맛!", rgb(0.95, 0.75, 1.0), 40, 0.15);
+      FloatText.spawn(this.fxLayer, v(x, this.headY - 80.0), "✨ 마법의 맛!", rgb(0.95, 0.75, 1.0), 40, 0.15);
       Sound.playSfx("magic");
     }
     if (res.result === "reject") {
@@ -797,23 +983,37 @@ export class ShiftView extends Scene {
 
   // ---------------------------------------------------------------- 세션 이벤트
 
+  /** 손님이 떠나며 남긴 평가: 머리 위에 별 점수 + 짧은 평 (위쪽 평점은 HUD 가 매 프레임 그림) */
+  private onReviewed(seat: number, score: number, tag: string): void {
+    const words: Record<string, string> = { good: "맛있어요", cheap: "가성비 최고", pricey: "비싸요…", slow: "너무 늦어요", bad: "별로예요" };
+    const col = score >= 4.2 ? rgb(1.0, 0.86, 0.3) : score >= 3.0 ? rgb(1.0, 0.95, 0.85) : rgb(1.0, 0.55, 0.45);
+    const pos = v(this.seatX(seat), this.headY - 96.0);
+    FloatText.spawn(this.fxLayer, pos, `★${score.toFixed(1)} ${words[tag] ?? ""}`, col, 32, 0.35);
+    this.hud.flashRating(score >= 3.0 ? 1 : -1);
+  }
+
   private facesToday = new Set<string>(); // 이번 영업에 온 손님 얼굴 (같은 사람이 또 오지 않게 — 그것 말고는 랜덤)
 
   private onCustomerArrived(seat: number): void {
     const c = this.session.seats[seat]!;
+    if (c.typeId === "imo") GameState.markImoVisited(); // 한 번 오면 끝 (영업 도중에 나가도 다시 안 옴)
     const view = new CustomerView();
     const taken = this.customerViews.filter((o): o is CustomerView => o !== null && !o.freed).map((o) => o.spriteName);
-    view.shopTheme = this.session.shop.theme;
     view.setup(c, seat, taken, this.facesToday);
-    view.position = v(this.seatX(seat), this.headY);
-    // 미식가는 조금 크게 (보스 손님)
-    // 어린 학생은 조금 작게 (자리에 맞춰 살짝 아래로)
-    const k = c.typeId === "gourmet" ? CUSTOMER_SCALE * 1.12 : view.outfit === "student" ? CUSTOMER_SCALE * 0.88 : CUSTOMER_SCALE;
+    // 모두 같은 크기 (머리 크기를 맞춤 — 미식가도 따로 키우지 않음, 2026-11-17)
+    const k = CUSTOMER_SCALE;
     view.scale = v(k, k);
-    if (view.outfit === "student") view.position = view.position.add(v(0, 26));
+    view.position = v(this.seatX(seat), this.seatHeadY(view.bodyBelow() * k));
     this.customerLayer.add(view);
     view.playEnter();
     this.customerViews[seat] = view;
+  }
+
+  /** 손님 머리 높이: 다 같이 headY, 몸이 짧은 그림은 몸 끝이 카운터(그림 가게는 그림 속 카운터 윗면) 뒤로 숨는 만큼 내림 */
+  private seatHeadY(bodyBelow: number): number {
+    const art = this.kitchen.art;
+    const cover = art !== null ? mapY(art, art.counterLine) : this.counterY;
+    return Math.max(this.headY, cover + 14.0 - bodyBelow);
   }
 
   private onCustomerLeft(seat: number, reason: string): void {

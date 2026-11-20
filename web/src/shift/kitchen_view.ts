@@ -9,26 +9,27 @@ import * as D from "../core/defs.ts";
 import type { ShiftSession } from "../core/shift_session.ts";
 import * as FoodArt from "../art/food_art.ts";
 import * as DishArt from "../art/dish_art.ts";
+import * as ArtAssets from "../art/art_assets.ts";
+import { type ShopArt, drawShopArt, mapRect, mapY } from "../art/shop_art.ts";
 
 const INK = rgb(0.2, 0.13, 0.09);
 
-const TRAY_CENTER_X = 730.0; // 완성 칸 전체의 가운데
-const SLOT_STEP = 120.0; // 한 메뉴 그릇 2칸 사이
+const TRAY_CENTER_X = 748.0; // 완성 칸 전체의 가운데
+const SLOT_STEP = 134.0; // 한 메뉴 그릇 2칸 사이 (2026-11-16 그릇을 키우며 넓힘, 예전 120)
 const GROUP_GAP = 30.0; // 메뉴 묶음 사이 간격
-const SLOT_SIZE = v(116, 112);
-export const BOWL_SCALE = 0.6;
+const SLOT_SIZE = v(130, 118);
+export const BOWL_SCALE = 0.7; // 완성 그릇 크기 (2026-11-16 사용자 "음식 크기가 좀 작다", 예전 0.6)
 const BOARD_X = 1440.0;
 const BOARD_SIZE = v(230, 112);
 
 const BIN_BASE = v(166, 176); // 원본 크기
-const BIN_SCALE = 0.82;
+const BIN_SCALE = 0.7; // 2026-11-17 손님이 더 보이게 조리대를 줄이며 같이 줄임 (예전 0.82 → 0.78)
 const BIN_CENTER_X = 960.0;
 const BIN_STEP = 180.0; // 재료통(메뉴 카드) 간격. 메뉴 수(최대 4)에 맞춰 가운데 정렬
 
 const TRASH_X = 1720.0;
 const TRASH_SCALE = 0.85;
-const BOWLS_X = 200.0;
-const BOWLS_SCALE = 0.8;
+// (예전 왼쪽 아래 "그릇" 더미는 2026-11-17 사용자 "안 쓰는 그릇은 지워 줘"로 뺌 — 장식이었음)
 const POWDER_X = 455.0; // 마법의 가루 통 (그릇 더미와 재료통 사이)
 const POWDER_SIZE = v(150, 176);
 
@@ -49,6 +50,9 @@ export class KitchenView extends Node2D {
   trayY = 642.0;
   binsY = 992.0;
 
+  /** 가게 영업 화면 그림 (사용자 그림, shop_art.ts). 있으면 카운터·도마(·조리대)는 그림 것을 씀 */
+  art: ShopArt | null = null;
+
   hiddenTraySlot = -1;
   hideBoard = false;
   dragging = false;
@@ -68,7 +72,7 @@ export class KitchenView extends Node2D {
     const gi = Math.trunc(i / D.TRAY_PER_MENU);
     const k = i % D.TRAY_PER_MENU;
     const x = TRAY_CENTER_X - total * 0.5 + gi * (this.groupW() + GROUP_GAP) + k * SLOT_STEP + SLOT_SIZE.x * 0.5;
-    return v(this.x0 + x, this.trayY);
+    return v(this.x0 + x, this.trayY + (this.art?.trayDy ?? 0));
   }
 
   trayRect(i: number): R {
@@ -76,10 +80,20 @@ export class KitchenView extends Node2D {
   }
 
   boardCenter(): V {
+    const art = this.art;
+    if (art) {
+      const b = mapRect(art, art.board);
+      return v(this.x0 + (b[0] + b[2]) * 0.5, (b[1] + b[3]) * 0.5);
+    }
     return v(this.x0 + BOARD_X, this.trayY);
   }
 
   boardRect(): R {
+    const art = this.art;
+    if (art) {
+      const b = mapRect(art, art.board);
+      return new R(this.x0 + b[0], b[1], b[2] - b[0], b[3] - b[1]);
+    }
     return R.of(this.boardCenter().sub(BOARD_SIZE.mul(0.5)), BOARD_SIZE);
   }
 
@@ -139,31 +153,56 @@ export class KitchenView extends Node2D {
     for (const k of Object.keys(this.binPop)) this.binPop[k] = Math.max(0.0, this.binPop[k] - dt * 4.0);
   }
 
+  /** 조리대(스테인리스) 윗면 = 완성 칸 바로 아래 */
+  kitchenTop(): number {
+    return this.trayY + SLOT_SIZE.y * 0.5 + 4.0;
+  }
+
+  /** 재료 선반 윗면 (조리대가 끝나는 곳) */
+  shelfTop(): number {
+    return this.binsY - BIN_BASE.y * BIN_SCALE * 0.5 - 12.0;
+  }
+
   draw(g: Gfx): void {
     const sz = this.size;
     const cy = this.counterY;
-    const kitchenTop = this.trayY + SLOT_SIZE.y * 0.5 + 4.0;
-    const shelfTop = this.binsY - BIN_BASE.y * BIN_SCALE * 0.5 - 12.0;
-    // 카운터
-    g.rect(new R(0, cy, sz.x, 20), rgb(0.55, 0.34, 0.2));
-    g.rect(new R(0, cy + 20.0, sz.x, kitchenTop - cy - 20.0), rgb(0.76, 0.57, 0.37));
-    for (let k = 0; k < 3; k++) {
-      const y = cy + 44.0 + k * 30.0;
-      g.line(v(0, y), v(sz.x, y + 4.0), rgb(0.68, 0.49, 0.3, 0.35), 2.0);
+    const kitchenTop = this.kitchenTop();
+    const shelfTop = this.shelfTop();
+    const art = this.art;
+    const img = art !== null ? ArtAssets.shopImage(this.session.shopId) : null;
+    if (art !== null && img !== null) {
+      // 가게 그림: 뒤층(StreetArt)은 이미 손님 뒤에 깔려 있다. 앞층(카운터·조리대·카운터 위 물건)을 손님 위에
+      // (2026-11-18 사용자 "조리대와 배경을 분리해 줘, 손님 일러스트는 그 사이에"). 앞층을 아직 못 받았으면 counterLine 아래를 한 번 더.
+      // 그림 속 조리대를 쓰는 가게는 조리대까지, 아니면 완성 칸 선반까지 — 그 아래는 게임 조리대 띠가 덮음
+      const y1 = art.kitchen !== null ? shelfTop : kitchenTop;
+      const front = ArtAssets.shopFrontImage(this.session.shopId);
+      if (front !== null) drawShopArt(g.ctx, front, art, 0, y1, this.x0);
+      else drawShopArt(g.ctx, img, art, mapY(art, art.counterLine), y1, this.x0);
+    } else {
+      // 카운터
+      g.rect(new R(0, cy, sz.x, 20), rgb(0.55, 0.34, 0.2));
+      g.rect(new R(0, cy + 20.0, sz.x, kitchenTop - cy - 20.0), rgb(0.76, 0.57, 0.37));
+      for (let k = 0; k < 3; k++) {
+        const y = cy + 44.0 + k * 30.0;
+        g.line(v(0, y), v(sz.x, y + 4.0), rgb(0.68, 0.49, 0.3, 0.35), 2.0);
+      }
     }
-    // 조리대 (스테인리스)
-    g.rect(new R(0, kitchenTop, sz.x, shelfTop - kitchenTop), rgb(0.3, 0.31, 0.33));
-    g.rect(new R(0, kitchenTop, sz.x, 10.0), rgb(0.55, 0.57, 0.6));
-    for (let x = 0.0; x < sz.x; x += 140.0) g.line(v(x, kitchenTop + 10.0), v(x + 40.0, shelfTop), rgb(1, 1, 1, 0.04), 18.0);
-    // 재료 선반
-    g.rect(new R(0, shelfTop, sz.x, sz.y - shelfTop), rgb(0.46, 0.3, 0.19));
-    g.rect(new R(0, shelfTop, sz.x, 8), rgb(0.36, 0.22, 0.13));
+    if (art === null || img === null || art.kitchen === null) {
+      // 조리대 (스테인리스) — 그림 속 조리 도구가 이 가게 것이 아니면 덮어서 가림
+      g.rect(new R(0, kitchenTop, sz.x, shelfTop - kitchenTop), rgb(0.3, 0.31, 0.33));
+      g.rect(new R(0, kitchenTop, sz.x, 10.0), rgb(0.55, 0.57, 0.6));
+      for (let x = 0.0; x < sz.x; x += 140.0) g.line(v(x, kitchenTop + 10.0), v(x + 40.0, shelfTop), rgb(1, 1, 1, 0.04), 18.0);
+    }
+    // 재료 선반 (그림이 있으면 그림의 아래 띠 색)
+    const floor = art !== null && img !== null ? rgb(art.floor[0] / 255, art.floor[1] / 255, art.floor[2] / 255) : rgb(0.46, 0.3, 0.19);
+    g.rect(new R(0, shelfTop, sz.x, sz.y - shelfTop), floor);
+    g.rect(new R(0, shelfTop, sz.x, 8), floor.darkened(0.3));
 
-    FoodArt.text(g, "완성 칸\n탭하면 서빙 →", v(this.trayCenter(0).x - SLOT_SIZE.x * 0.5 - 92.0, this.trayY), 22, rgb(0.36, 0.22, 0.12), 170.0);
+    // 완성 칸 왼쪽 안내 (그릇을 키우며 칸이 넓어져 화면 왼쪽 끝 안에 들어오게). 가게 그림이면 그림 속 간판과 겹쳐서 뺌
+    if (img === null) FoodArt.text(g, "완성 칸\n탭하면 서빙 →", v(Math.max(this.x0 + 84.0, this.trayCenter(0).x - SLOT_SIZE.x * 0.5 - 86.0), this.trayY), 21, rgb(0.36, 0.22, 0.12), 160.0);
     this.drawTray(g);
     this.drawBoard(g);
     this.drawBins(g);
-    this.drawBowlStack(g);
     this.drawTrash(g);
     this.drawPowder(g);
     g.resetTransform();
@@ -242,13 +281,14 @@ export class KitchenView extends Node2D {
       const left = this.trayRect(first).x;
       const right = this.trayRect(first + D.TRAY_PER_MENU - 1).endX;
       const mid = (left + right) * 0.5;
+      const ty = this.trayCenter(first).y;
       if (!s.menuPool.includes(menu)) {
-        FoodArt.roundedRect(g, new R(left - 4.0, this.trayY - SLOT_SIZE.y * 0.5 + 2.0, right - left + 8.0, SLOT_SIZE.y - 4.0), rgb(0.62, 0.45, 0.28, 0.78), 16.0);
-        FoodArt.lockIcon(g, v(mid, this.trayY - 14.0), 0.8, rgb(0.36, 0.24, 0.14));
-        FoodArt.text(g, D.levelName(D.menuUnlockLevel(menu)), v(mid, this.trayY + 46.0), 20, rgb(0.36, 0.24, 0.14, 0.9), right - left);
+        FoodArt.roundedRect(g, new R(left - 4.0, ty - SLOT_SIZE.y * 0.5 + 2.0, right - left + 8.0, SLOT_SIZE.y - 4.0), rgb(0.62, 0.45, 0.28, 0.78), 16.0);
+        FoodArt.lockIcon(g, v(mid, ty - 14.0), 0.8, rgb(0.36, 0.24, 0.14));
+        FoodArt.text(g, D.levelName(D.menuUnlockLevel(menu)), v(mid, ty + 46.0), 20, rgb(0.36, 0.24, 0.14, 0.9), right - left);
         continue;
       }
-      FoodArt.textOutlined(g, D.menuLabel(menu), v(mid, this.trayY + 46.0), 20, rgb(1.0, 0.97, 0.9), rgb(0.36, 0.22, 0.12, 0.85), 5, right - left + 20.0);
+      FoodArt.textOutlined(g, D.menuLabel(menu), v(mid, ty + 46.0), 20, rgb(1.0, 0.97, 0.9), rgb(0.36, 0.22, 0.12, 0.85), 5, right - left + 20.0);
     }
   }
 
@@ -256,11 +296,16 @@ export class KitchenView extends Node2D {
     const r = this.boardRect();
     const sc = 1.0 + 0.08 * this.boardPop;
     const c = this.boardCenter();
-    FoodArt.roundedRect(g, R.of(c.sub(BOARD_SIZE.mul(0.5 * sc)).add(v(0, 4)), BOARD_SIZE.mul(sc).sub(v(0, 8))), rgb(0.88, 0.72, 0.5), 20.0, rgb(0.66, 0.5, 0.3), 3);
-    for (let k = 0; k < 3; k++) g.line(c.add(v(-86, -22 + k * 22)), c.add(v(86, -18 + k * 22)), rgb(0.78, 0.6, 0.38, 0.6), 2.0);
+    const drawn = this.art !== null && ArtAssets.shopImage(this.session.shopId) !== null; // 그림 속 도마를 씀
+    if (!drawn) {
+      FoodArt.roundedRect(g, R.of(c.sub(BOARD_SIZE.mul(0.5 * sc)).add(v(0, 4)), BOARD_SIZE.mul(sc).sub(v(0, 8))), rgb(0.88, 0.72, 0.5), 20.0, rgb(0.66, 0.5, 0.3), 3);
+      for (let k = 0; k < 3; k++) g.line(c.add(v(-86, -22 + k * 22)), c.add(v(86, -18 + k * 22)), rgb(0.78, 0.6, 0.38, 0.6), 2.0);
+    }
     const cut = this.session.cutting;
     if (cut === null || this.hideBoard) {
-      FoodArt.text(g, this.boardNote(), c, 24, rgb(0.55, 0.38, 0.22, 0.8), r.w);
+      const note = this.boardNote();
+      // 그림 속 도마는 보면 도마라서 "도마" 이름은 빼고, 아직 안 열린 메뉴 안내만
+      if (!drawn || note !== "도마") FoodArt.text(g, note, c, 24, rgb(0.55, 0.38, 0.22, 0.8), r.w);
       return;
     }
     const menu = cut.menu;
@@ -300,7 +345,9 @@ export class KitchenView extends Node2D {
         const mname = D.menuName(id);
         const fs = mname.length <= 4 ? 30 : mname.length === 5 ? 26 : 22;
         FoodArt.text(g, mname, r.pos.add(v(r.w * 0.5, 128)), fs, INK, r.w);
-        FoodArt.text(g, D.formatWon(D.menuPrice(id)), r.pos.add(v(r.w * 0.5, 158)), 22, rgb(0.35, 0.3, 0.28), r.w);
+        const lvl = this.session.priceLevel(id);
+        const pc = lvl === "cheap" ? rgb(0.15, 0.45, 0.85) : lvl === "pricey" ? rgb(0.85, 0.2, 0.15) : rgb(0.35, 0.3, 0.28);
+        FoodArt.text(g, D.formatWon(this.session.postedPrice(id)) + (lvl !== "normal" ? ` ${D.PRICE_LEVELS[lvl].name}` : ""), r.pos.add(v(r.w * 0.5, 158)), 20, pc, r.w);
         // 남은 재료 (재료를 사서 쓰는 영업만): 오른쪽 위 동그란 배지, 다 떨어지면 카드 위에 "품절"
         const left = this.session.stockLeft(id);
         if (left !== Infinity) {
@@ -324,18 +371,6 @@ export class KitchenView extends Node2D {
     g.resetTransform();
   }
 
-  private drawBowlStack(g: Gfx): void {
-    g.setTransform(v(this.x0 + BOWLS_X, this.binsY + 2.0), 0, BOWLS_SCALE);
-    for (let k = 0; k < 5; k++) {
-      const p = v(0, -k * 16.0);
-      FoodArt.ellipse(g, p.add(v(0, 14)), 78.0, 26.0, FoodArt.BOWL.darkened(0.18));
-      FoodArt.ellipse(g, p, 78.0, 22.0, FoodArt.BOWL);
-      g.line(p.add(v(-60, 12)), p.add(v(60, 12)), FoodArt.BOWL_STRIPE, 3.0);
-    }
-    FoodArt.text(g, "그릇", v(0, 62), 28, rgb(0.92, 0.86, 0.78));
-    g.resetTransform();
-  }
-
   private drawTrash(g: Gfx): void {
     const c = this.trashCenter();
     const hot = this.dragging && this.trashHot;
@@ -348,7 +383,7 @@ export class KitchenView extends Node2D {
     FoodArt.roundedRect(g, new R(-70.0, -46.0, 140.0, 104.0), col, 16.0);
     FoodArt.roundedRect(g, new R(-82.0, hot ? -70.0 : -62.0, 164.0, 22.0), col.darkened(0.2), 10.0);
     for (let k = 0; k < 3; k++) g.line(v(-34.0 + k * 34.0, -26.0), v(-34.0 + k * 34.0, 44.0), col.darkened(0.25), 4.0);
-    FoodArt.text(g, "쓰레기통", v(0, 80), 26, rgb(0.92, 0.86, 0.78));
+    FoodArt.text(g, "쓰레기통", v(0, 74), 26, rgb(0.92, 0.86, 0.78));
     g.resetTransform();
   }
 }

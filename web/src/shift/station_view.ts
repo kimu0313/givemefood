@@ -52,7 +52,7 @@ export function hintFor(item: CookItem, compact = false): [string, Color, boolea
 }
 
 /** 조리 중인 음식 그리기 (드래그 고스트에서도 사용) */
-export function drawCookItem(g: Gfx, item: CookItem, c: V, s: number): void {
+export function drawCookItem(g: Gfx, item: CookItem, c: V, s: number, noPan = false): void {
   const col = FoodArt.itemColor(item);
   switch (item.menuId) {
     case "tteokbokki":
@@ -74,7 +74,19 @@ export function drawCookItem(g: Gfx, item: CookItem, c: V, s: number): void {
       FoodArt.drawFood(g, item.menuId, c, s, col);
       break;
     default:
-      FoodArt.drawFood(g, item.menuId, c, FoodShapes.cookScale(item.menuId) * s, col, FoodShapes.cookOpts(item));
+      // 그림 속 화구에 프라이팬이 / 그림 속에 냄비가 그려져 있으면 음식의 팬·냄비 물은 빼고 (noPan → bare)
+      FoodArt.drawFood(g, item.menuId, c, FoodShapes.cookScale(item.menuId) * s, col, noPan ? { ...FoodShapes.cookOpts(item), pan: false, bare: true } : FoodShapes.cookOpts(item));
+  }
+}
+
+/** 화구 4칸(2×2)을 한 덩어리 화로로 묶는 바탕 (화면 좌표 rect, 화구 칸들보다 먼저 그림) */
+export class StoveFrame extends Node2D {
+  rect = new R(0, 0, 0, 0);
+  draw(g: Gfx): void {
+    const r = this.rect.grow(6.0);
+    FoodArt.roundedRect(g, r.moved(v(0, 5)), rgb(0, 0, 0, 0.3), 20.0);
+    FoodArt.roundedRect(g, r, rgb(0.14, 0.14, 0.16), 20.0, rgb(0.5, 0.51, 0.55), 4);
+    g.line(v(r.x + 18.0, r.y + 4.0), v(r.endX - 18.0, r.y + 4.0), rgb(1, 1, 1, 0.22), 3.0);
   }
 }
 
@@ -88,6 +100,12 @@ export class StationView extends Node2D {
   title = "";
   lockedNote = ""; // 비어 있지 않으면 잠긴 칸으로 표시
   hiddenSlot = -1; // 드래그 중이라 숨길 칸
+  /**
+   * 가게 그림 속 도구 (shop_art.ts, 이 노드 기준 좌표): 있으면 도구 틀을 안 그리고 그 자리에 음식·게이지·안내만.
+   * cells = 어묵 사각틀 칸 / 튀김기 바구니 / 석쇠 칸 / 냄비 자리, pan = 떡볶이 철판 · 화구의 팬(음식 자리), pot = 순대 솥 [가운데, 반지름],
+   * hasPan = 그림 속 화구에 프라이팬이 있음 (음식의 팬을 안 그림), hasPot = 그림 속에 냄비가 있음 (게임 냄비·물은 안 그리고 면만)
+   */
+  art: { cells: R[] | null; pan: R | null; pot: [V, V] | null; hasPan: boolean; hasPot?: boolean } | null = null;
 
   private pops: number[] = [];
   private steam: Steam[] = [];
@@ -115,6 +133,15 @@ export class StationView extends Node2D {
     }
   }
 
+  /** 김 나는 자리를 칸 자리에 다시 맞춤 (그림 속 도구 자리를 정한 뒤) */
+  refreshSteam(): void {
+    for (let k = 0; k < this.steam.length; k++) {
+      const p = this.steam[k];
+      p.extents = v(this.isBig() || this.gridCols > 0 || this.art?.cells ? this.slotRect(k).w * 0.3 : 30.0, 6.0);
+      p.position = this.slotCenter(k).add(v(0, this.gridCols === 0 ? -36 : -10));
+    }
+  }
+
   isLocked(): boolean {
     return this.lockedNote !== "";
   }
@@ -125,6 +152,8 @@ export class StationView extends Node2D {
   }
 
   slotWidth(): number {
+    const cells = this.art?.cells;
+    if (cells && this.gridCols === 0) return cells.reduce((n, c) => n + c.w, 0) / cells.length;
     return this.size.x / this.slotCount;
   }
 
@@ -138,6 +167,8 @@ export class StationView extends Node2D {
   }
 
   private cellRect(k: number): R {
+    const art = this.art?.cells;
+    if (art && art[k]) return art[k];
     const inner = this.frameRect().grow(-9.0);
     const gap = 9.0;
     const rows = this.rows();
@@ -148,14 +179,32 @@ export class StationView extends Node2D {
     return new R(inner.x + col * (w + gap), inner.y + row * (h + gap), w, h);
   }
 
+  /** 2×2 화로의 납작한 화구 한 칸 (위 2 · 아래 2) */
+  private isFlat(): boolean {
+    return this.size.y < 200.0;
+  }
+
   slotCenter(k: number): V {
     if (this.gridCols > 0) return this.cellRect(k).center();
-    if (this.slotCount === 1) return v(0, -6);
+    if (this.slotCount === 1) {
+      const ap = this.artBurnerPan();
+      if (ap !== null) return ap.center();
+      return v(0, this.isFlat() ? 2 : -6);
+    }
+    const cells = this.art?.cells;
+    if (cells && cells[k]) return cells[k].center();
     return v(-this.size.x * 0.5 + this.slotWidth() * (k + 0.5), 4);
+  }
+
+  /** 그림 속 화구: 팬(음식) 자리 */
+  private artBurnerPan(): R | null {
+    return this.station === D.STATION_BURNER && this.art?.pan ? this.art.pan : null;
   }
 
   slotRect(k: number): R {
     if (this.gridCols > 0) return this.cellRect(k).grow(4.0);
+    const cells = this.art?.cells;
+    if (cells && cells[k]) return new R(cells[k].x - 6.0, -this.size.y * 0.5, cells[k].w + 12.0, this.size.y);
     const w = this.slotWidth();
     return new R(-this.size.x * 0.5 + w * k, -this.size.y * 0.5, w, this.size.y);
   }
@@ -191,7 +240,8 @@ export class StationView extends Node2D {
     this.sparkT = performance.now() / 1000;
     const sz = this.size;
     const r = new R(-sz.x * 0.5, -sz.y * 0.5, sz.x, sz.y);
-    this.drawBase(g, r);
+    if (this.art !== null) this.drawArtBase(g);
+    else this.drawBase(g, r);
     let anyItem = false;
     for (let k = 0; k < this.slotCount; k++) {
       const item = this.itemAt(k);
@@ -204,31 +254,63 @@ export class StationView extends Node2D {
       }
       const c = this.slotCenter(k);
       if (this.isBig()) this.drawBigItem(g, item, popS);
-      else drawCookItem(g, item, c, popS * this.itemScale());
+      else drawCookItem(g, item, c, popS * this.itemScale(), (this.art?.hasPan ?? false) || (this.art?.hasPot ?? false));
       if (item.magic) FoodArt.magicSparkles(g, this.isBig() ? v(0, -6) : c, this.isBig() ? sz.x * 0.36 : 62.0 * this.itemScale(), this.sparkT, this.isBig() ? 8 : 5);
       const w = this.slotWidth();
-      this.drawGauge(g, item, new R(c.x - w * 0.42, sz.y * 0.5 - 30.0, w * 0.84, 16.0));
+      const ap = this.artBurnerPan();
+      if (ap !== null) {
+        // 그림 속 화구: 게이지는 팬 아래, 안내는 팬 위
+        const gw = Math.max(110.0, ap.w * 0.8);
+        this.drawGauge(g, item, new R(c.x - gw * 0.5, ap.endY - 4.0, gw, 13.0));
+        this.drawHint(g, item, v(c.x, ap.y + 2.0), Math.max(ap.w, w * 0.8), 22);
+        continue;
+      }
+      const gw = this.isFlat() ? w * 0.6 : w * 0.84;
+      this.drawGauge(g, item, new R(c.x - gw * 0.5, sz.y * 0.5 - (this.isFlat() ? 24.0 : 30.0), gw, 16.0));
       // 한 칸짜리는 이름 자리에 안내 문구를, 여러 칸짜리는 이름 아래에 칸별 문구를 쓴다
       const hintY = -sz.y * 0.5 + (this.slotCount === 1 ? 28.0 : 54.0);
       this.drawHint(g, item, v(c.x, hintY), w);
     }
-    if (this.slotCount > 1 || !anyItem) FoodArt.text(g, this.title, v(0, -sz.y * 0.5 + (this.gridCols > 0 ? 18.0 : 22.0)), 22, rgb(1, 1, 1, 0.55), sz.x);
+    if (this.art !== null) {
+      // 그림 속 도구는 보면 알아서 이름을 안 씀
+    } else if (this.isFlat()) {
+      // 납작한 화구 칸: 이름은 왼쪽 위 구석 (가운데는 불판)
+      if (!anyItem) FoodArt.text(g, this.title, v(-sz.x * 0.5 + 52.0, -sz.y * 0.5 + 20.0), 20, rgb(1, 1, 1, 0.55), 90.0);
+    } else if (this.slotCount > 1 || !anyItem) FoodArt.text(g, this.title, v(0, -sz.y * 0.5 + (this.gridCols > 0 ? 18.0 : 22.0)), 22, rgb(1, 1, 1, 0.55), sz.x);
     if (this.isBig() && !anyItem && !this.isLocked()) {
       const what = this.station === "pan" ? "떡볶이 재료를 탭하면\n한 판 끓여요" : "순대 재료를 탭하면\n솥에 쪄요";
       FoodArt.textOutlined(g, what, v(0, 8), 24, rgb(1, 1, 1, 0.75), rgb(0, 0, 0, 0.55), 6, sz.x);
     }
     if (this.isLocked()) {
+      if (this.isFlat()) {
+        // 납작한 화구 칸: 자물쇠 왼쪽 · 글 오른쪽
+        FoodArt.roundedRect(g, r.grow(-3.0), rgb(0, 0, 0, 0.62), 14.0);
+        if (sz.x < 230.0 && sz.y > 110.0) {
+          // 좁고 높은 칸 (가게 그림 속 작은 화구): 자물쇠 위 · 글 아래
+          FoodArt.lockIcon(g, v(0, -sz.y * 0.2), 0.9, rgb(0.85, 0.82, 0.78));
+          FoodArt.text(g, this.lockedNote, v(0, sz.y * 0.22), 20, rgb(0.9, 0.87, 0.82), sz.x - 12.0);
+          return;
+        }
+        FoodArt.lockIcon(g, v(-sz.x * 0.27, -4), 1.1, rgb(0.85, 0.82, 0.78));
+        FoodArt.text(g, this.lockedNote, v(sz.x * 0.12, 0), 24, rgb(0.9, 0.87, 0.82), sz.x * 0.6);
+        return;
+      }
       FoodArt.roundedRect(g, r.grow(-8.0), rgb(0, 0, 0, 0.62), 22.0);
       FoodArt.lockIcon(g, v(0, -24), 1.3, rgb(0.85, 0.82, 0.78));
       FoodArt.text(g, this.lockedNote, v(0, 52), 26, rgb(0.9, 0.87, 0.82), sz.x - 20.0);
     }
   }
 
+  /**
+   * 조리 중인 음식 크기 = 칸 크기에 맞춰 (2026-11-16 사용자 "음식 크기도 너무 작아, 커야 해").
+   * 한 칸짜리 화구는 칸 높이를 꽉 채우고, 여러 칸 도구(튀김기·석쇠·냄비)는 한 칸 너비에 맞춰 (칸이 넓어지면 같이 커짐).
+   */
   private itemScale(): number {
-    if (this.station === "broth") return 0.78;
-    if (this.slotCount >= 3) return 0.6;
-    if (this.slotCount === 2) return 0.8;
-    return 1.0;
+    if (this.station === "broth") return 0.86;
+    const ap = this.artBurnerPan();
+    if (ap !== null) return clamp(ap.w / 170.0, 0.55, 1.15);
+    if (this.slotCount === 1) return Math.min(1.15, this.size.y / 130.0);
+    return clamp(0.4 + this.slotWidth() * 0.0031, 0.6, 1.1);
   }
 
   private drawBase(g: Gfx, r: R): void {
@@ -247,25 +329,96 @@ export class StationView extends Node2D {
         return this.drawSteamer(g, r);
     }
     if (this.station === D.STATION_BURNER) {
-      FoodArt.roundedRect(g, r.grow(-8.0), rgb(0.2, 0.2, 0.23), 22.0, rgb(0.33, 0.33, 0.37), 3);
+      const flat = this.isFlat();
+      FoodArt.roundedRect(g, r.grow(flat ? -3.0 : -8.0), rgb(0.2, 0.2, 0.23), flat ? 14.0 : 22.0, rgb(0.33, 0.33, 0.37), 3);
       const c = this.slotCenter(0);
+      // 불판 고리 크기는 칸에 맞춰 (예전 한 줄 화구 = 반지름 84)
+      const k84 = (Math.min(this.size.x, this.size.y) * 0.5 - (flat ? 8.0 : 36.0)) / 84.0;
       const cooking = this.itemAt(0) !== null && !this.isLocked();
-      if (cooking) g.circle(c, 96.0, rgb(1.0, 0.45, 0.12, 0.16 + 0.05 * Math.sin(this.t * 12.0)));
-      g.circle(c, 84.0, rgb(0.1, 0.1, 0.11));
-      g.arc(c, 62.0, 0.0, TAU, rgb(0.36, 0.36, 0.4), 5.0);
-      g.arc(c, 40.0, 0.0, TAU, rgb(0.3, 0.3, 0.33), 4.0);
+      if (cooking) g.circle(c, 96.0 * k84, rgb(1.0, 0.45, 0.12, 0.16 + 0.05 * Math.sin(this.t * 12.0)));
+      g.circle(c, 84.0 * k84, rgb(0.1, 0.1, 0.11));
+      g.arc(c, 62.0 * k84, 0.0, TAU, rgb(0.36, 0.36, 0.4), 5.0);
+      g.arc(c, 40.0 * k84, 0.0, TAU, rgb(0.3, 0.3, 0.33), 4.0);
       if (cooking) {
         const heat = 1.0 / Math.max(this.session.heatScale, 0.5);
         for (let k = 0; k < 12; k++) {
           const a = (TAU * k) / 12.0 + this.t * 0.6;
           const dir = v(Math.cos(a), Math.sin(a));
-          const base = c.add(dir.mul(74.0));
-          const tip = c.add(dir.mul(84.0 + (6.0 + 4.0 * Math.sin(this.t * 20.0 + k)) * heat));
-          const side = v(-Math.sin(a), Math.cos(a)).mul(6.0);
+          const base = c.add(dir.mul(74.0 * k84));
+          const tip = c.add(dir.mul((84.0 + (6.0 + 4.0 * Math.sin(this.t * 20.0 + k)) * heat) * k84));
+          const side = v(-Math.sin(a), Math.cos(a)).mul(6.0 * k84);
           g.polygon([base.add(side), tip, base.sub(side)], rgb(0.35, 0.6, 1.0, 0.85));
         }
       }
     }
+  }
+
+  /** 그림 속 도구: 틀은 그림이 그렸으니 끓는 기름 방울·국물 거품만 (조리 중일 때) */
+  private drawArtBase(g: Gfx): void {
+    const cells = this.art?.cells ?? [];
+    // 냄비 자리: 그림에 화로만 있으면 냄비는 게임이 그림 (실내 포차 찌개 냄비). 그림에 냄비가 있으면(분식집) 그대로
+    if (this.station === "pot" && !this.art?.hasPot) {
+      for (let k = 0; k < cells.length; k++) this.drawArtPot(g, cells[k], this.itemAt(k) !== null && !this.isLocked());
+    }
+    if (!this.anyCooking()) return;
+    const ap = this.artBurnerPan();
+    if (ap !== null) {
+      // 팬 밑 불꽃 + 달아오른 빛
+      const pc = ap.center();
+      FoodArt.ellipse(g, pc.add(v(0, ap.h * 0.38)), ap.w * 0.56, ap.h * 0.42, rgb(1.0, 0.45, 0.12, 0.2 + 0.06 * Math.sin(this.t * 11.0)));
+      for (let k = 0; k < 7; k++) {
+        const x = pc.x + (k / 6 - 0.5) * ap.w * 0.78;
+        const y = ap.endY + 3.0 - Math.abs(k / 6 - 0.5) * ap.h * 0.3;
+        const fl = 10.0 + 4.0 * Math.sin(this.t * 20.0 + k * 1.7);
+        g.polygon([v(x - 5.0, y), v(x, y - fl), v(x + 5.0, y)], rgb(0.35, 0.6, 1.0, 0.85));
+      }
+      return;
+    }
+    if (this.station === "grill") {
+      for (let k = 0; k < cells.length; k++) {
+        if (this.itemAt(k) === null) continue;
+        const cell = cells[k];
+        FoodArt.ellipse(g, cell.center().add(v(0, cell.h * 0.15)), cell.w * 0.46, cell.h * 0.42, rgb(1.0, 0.4, 0.1, 0.16 + 0.06 * Math.sin(this.t * 9.0 + k)));
+      }
+      return;
+    }
+    if (this.station === "fryer") {
+      for (let k = 0; k < cells.length; k++) {
+        if (this.itemAt(k) === null) continue;
+        const oil = cells[k];
+        for (let j = 0; j < 8; j++) {
+          const bx = oil.x + fmod(j * 37.0 + this.t * 23.0, oil.w);
+          const by = oil.y + 8.0 + fmod(j * 19.0 + this.t * 31.0, oil.h - 16.0);
+          g.circle(v(bx, by), 2.5 + 1.5 * Math.abs(Math.sin(this.t * 9.0 + j)), rgb(1.0, 0.92, 0.6, 0.7));
+        }
+      }
+    } else if (this.station === "broth") {
+      for (let k = 0; k < cells.length; k++) {
+        if (this.itemAt(k) === null) continue;
+        const cell = cells[k];
+        for (let b = 0; b < 3; b++) {
+          const bx = cell.x + cell.w * (0.2 + 0.3 * b) + Math.sin(this.t * 1.7 + b * 2.0 + k) * 8.0;
+          const by = cell.y + cell.h * 0.45 + Math.sin(this.t * 2.3 + b + k * 1.3) * 5.0;
+          g.circle(v(bx, by), 3.0, rgb(1.0, 0.92, 0.7, 0.55));
+        }
+      }
+    }
+  }
+
+  /** 그림 속 화로 위 양은 냄비 (칸 가운데 = 냄비 입구) */
+  private drawArtPot(g: Gfx, cell: R, cooking: boolean): void {
+    const c = cell.center().add(v(0, -2));
+    const rx = cell.w * 0.42;
+    const ry = 18.0;
+    const bodyH = 46.0;
+    const gold = rgb(0.86, 0.7, 0.36);
+    if (cooking) FoodArt.ellipse(g, c.add(v(0, bodyH + 8.0)), rx * 1.02, 20.0, rgb(1.0, 0.45, 0.12, 0.25 + 0.06 * Math.sin(this.t * 12.0)));
+    for (const sx of [-1.0, 1.0]) Ink.rrect(g, new R(sx < 0 ? c.x - rx - 20.0 : c.x + rx - 2.0, c.y + 6.0, 22.0, 11.0), rgb(0.32, 0.26, 0.22), 4.0, 2.5);
+    const side = Ink.ellipsePoints(c.add(v(0, bodyH)), rx * 0.95, ry * 0.9, 16, 0.0, PI).concat(Ink.ellipsePoints(c, rx, ry, 16, PI, TAU));
+    Ink.poly(g, side, gold.darkened(0.08), 3.5);
+    g.line(v(c.x - rx * 0.96, c.y + bodyH * 0.45), v(c.x + rx * 0.96, c.y + bodyH * 0.45), gold.darkened(0.2), 3.0);
+    Ink.ellipse(g, c, rx, ry, gold.lightened(0.12), 3.5);
+    FoodArt.ellipse(g, c.add(v(0, 2)), rx * 0.86, ry * 0.7, rgb(0.3, 0.3, 0.33));
   }
 
   private anyCooking(): boolean {
@@ -322,6 +475,7 @@ export class StationView extends Node2D {
   // ---------------------------------------------------------------- 떡볶이 판
 
   private panRect(): R {
+    if (this.art?.pan) return this.art.pan;
     return new R(-this.size.x * 0.5 + 34.0, -this.size.y * 0.5 + 50.0, this.size.x - 68.0, this.size.y - 104.0);
   }
 
@@ -398,10 +552,12 @@ export class StationView extends Node2D {
   // ---------------------------------------------------------------- 순대 솥
 
   private potCenter(): V {
+    if (this.art?.pot) return this.art.pot[0];
     return v(0, -2);
   }
 
   private potRadii(): V {
+    if (this.art?.pot) return this.art.pot[1];
     return v(Math.min(this.size.x * 0.42, 170.0), 54.0);
   }
 

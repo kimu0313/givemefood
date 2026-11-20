@@ -68,12 +68,12 @@ export function openCollection(host: HTMLElement, h: CollectionHandlers): HTMLDi
   const bestText: string[] = [];
   for (const shop of D.SHOPS) {
     if (!GameState.shopOpened(shop.id)) continue;
-    starsText.push(`${shop.name} ★${GameState.shopRating(shop.id).toFixed(1)}`);
+    starsText.push(`${shop.name} ★${GameState.liveRating(shop.id).toFixed(1)}`);
     if (GameState.shopCleared(shop.id)) bestText.push(`${shop.name} ${D.formatWon(GameState.bestEndlessFor(shop.id))}`);
   }
-  col.appendChild(Ui.label("가게 별점 (5점 만점)  " + starsText.join(" · "), 26, Ui.INK, "center", true));
+  col.appendChild(Ui.label("가게 평점 (손님 평가, 5점 만점)  " + starsText.join(" · "), 26, Ui.INK, "center", true));
   col.appendChild(Ui.label("무한 영업 최고  " + (bestText.length > 0 ? bestText.join(" · ") : "아직 없음"), 26, Ui.INK, "center", true));
-  // 미식가 황 선생의 평가 (가게 사이 이벤트, 한 번씩)
+  // 황 평론가의 평가 (가게 사이 이벤트, 한 번씩)
   const evText: string[] = [];
   for (const e of D.EVENTS) {
     if (!GameState.eventPlayed(e.shop)) continue;

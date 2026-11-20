@@ -81,7 +81,9 @@ export class GourmetLogic extends CustomerLogic {
     } else {
       this.bad += 1;
     }
-    if (magic) paid *= MAGIC_PRICE_MULT;
+    // 미식가는 늘 보통 값 (가격 단계·마법의 가루로 더 내지 않음 — 대신 리뷰로 가게가 유명해짐)
+    void magic;
+    void MAGIC_PRICE_MULT;
     this.score += GOURMET_POINTS[quality] ?? 0;
     this.resolved += 1;
     this.earned += paid + tip;

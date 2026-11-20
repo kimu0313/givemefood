@@ -9,6 +9,7 @@ export interface OrderItem {
   menu: string;
   served: boolean;
   quality: number;
+  priceLevel?: string; // 받을 때의 가격 단계 (영업 중에 가격을 바꿔도 평가는 그때 낸 값으로)
 }
 
 export interface ServeResult {
@@ -36,6 +37,9 @@ export class CustomerLogic {
   swapped = false;
   revealLeft = 0.0; // 취객: 주문이 또렷하게 보이는 남은 시간
   earned = 0;
+  lastPatienceRatio = 1.0; // 마지막 음식을 받을 때 남은 인내심 (평가에 씀)
+  gotMagic = false;
+  critic = ""; // 미식가 이벤트 손님: 어느 미식가인지 (D.CRITICS)
 
   constructor(type: string, menus: string[], patienceMult = 1.0) {
     this.typeId = type;
@@ -87,12 +91,19 @@ export class CustomerLogic {
     return "";
   }
 
-  serve(menuId: string, quality: number, magic = false): ServeResult {
+  /** 가격을 느끼는 손님 (일반·급한 손님·진상·취객). 단골·미식가는 아님 */
+  priceSensitive(): boolean {
+    return this.typeId !== "regular" && this.typeId !== "gourmet" && this.typeId !== "imo";
+  }
+
+  /** priceMult = 메뉴 가격 단계 배수 (가격을 느끼는 손님만 — 단골은 늘 1), priceLevel = 그 단계 이름 (평가용) */
+  serve(menuId: string, quality: number, magic = false, priceMult = 1.0, priceLevel = "normal"): ServeResult {
     if (this.state !== CState.WAITING) return { result: "reject", reason: "busy" };
     const idx = this.items.findIndex((it) => !it.served && it.menu === menuId);
     if (idx < 0) return { result: "reject", reason: "wrong" };
     this.items[idx].served = true;
     this.items[idx].quality = quality;
+    this.items[idx].priceLevel = priceLevel;
     if (quality === Q.RAW) {
       this.state = CState.ANGRY;
       return { result: "angry", reason: "raw", paid: 0, tip: 0, done: true };
@@ -102,6 +113,9 @@ export class CustomerLogic {
     if (quality === Q.PERFECT) tip = tipFor(menuId, this.tipMult);
     if (quality === Q.BURNT) price = burntPrice(menuId);
     if (magic) price *= MAGIC_PRICE_MULT; // 마법의 가루: 감동해서 값 2배
+    if (this.priceSensitive()) price = Math.round((price * priceMult) / 10) * 10;
+    this.lastPatienceRatio = this.patienceRatio();
+    if (magic) this.gotMagic = true;
     this.earned += price + tip;
     const done = this.unservedMenus().length === 0;
     if (done) this.state = CState.HAPPY;

@@ -13,6 +13,7 @@ import * as Ink from "./ink.ts";
 import * as FoodArt from "./food_art.ts";
 import * as AlleyArt from "./alley_art.ts";
 import * as ArtAssets from "./art_assets.ts";
+import { ART_BANDS, SHOP_ART, drawShopArt } from "./shop_art.ts";
 
 export const TARP_RED = rgb(0.84, 0.29, 0.19);
 export const TARP_CREAM = rgb(0.96, 0.88, 0.74);
@@ -75,6 +76,23 @@ export class StreetArt extends Node2D {
   }
 
   draw(g: Gfx): void {
+    // 가게 영업 화면 그림 (사용자 그림): 화면 전체 (카운터·조리대까지 그려져 있음 — 영업 화면은 KitchenView 가 그 위에)
+    const shopImg = this.shopId !== "" ? ArtAssets.shopImage(this.shopId) : null;
+    if (shopImg !== null) {
+      const a = SHOP_ART[this.shopId];
+      drawShopArt(g.ctx, shopImg, a); // 영업 화면 띠에 맞춰 세 띠로 (shop_art.ts mapY)
+      // 그림 속 조리 도구가 이 가게 것이 아니면 (kitchen = null) 장보기·업그레이드 배경에서도 영업 화면처럼
+      // 조리대 띠로 가림 — 영업 화면에서는 KitchenView 가 덮으니 그대로
+      if (a.kitchen === null && this.counterY > 900) {
+        const { kitchenTop: kt, shelfTop: st } = ART_BANDS;
+        g.rect(new R(0, kt, this.size.x, st - kt), rgb(0.3, 0.31, 0.33));
+        g.rect(new R(0, kt, this.size.x, 10), rgb(0.55, 0.57, 0.6));
+        const fl = rgb(a.floor[0] / 255, a.floor[1] / 255, a.floor[2] / 255);
+        g.rect(new R(0, st, this.size.x, this.size.y - st), fl);
+        g.rect(new R(0, st, this.size.x, 8), fl.darkened(0.3));
+      }
+      return;
+    }
     const tex = this.shopId !== "" ? ArtAssets.background(this.shopId) : null;
     if (tex !== null) {
       g.texture(tex, new R(0, 0, this.size.x, this.counterY));

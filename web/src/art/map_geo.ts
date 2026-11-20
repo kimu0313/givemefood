@@ -10,6 +10,15 @@ import { R, V, v } from "../engine/geom.ts";
 import * as D from "../core/defs.ts";
 import type { ShopDef } from "../core/defs.ts";
 
+import { WORLD_BOTTOMS, WORLD_PATH, WORLD_PEAKS, WORLD_W } from "./map_world.ts";
+
+/**
+ * 지도 배경 = 사용자가 준 그림 한 장 (2026-11-16 사용자 "이거 스테이지 배경에 넣어줘", art_src/map_world.png → tools/world_map.mjs).
+ * 길·구역·발판은 그 그림의 길을 따라 잡는다 (map_world.ts). false 면 예전처럼 땅·길·집을 도형으로 그린 지도.
+ */
+export const WORLD_ART = true;
+const EVENT_GAP = 2.4; // 가게 경계(미식가 발판) 앞뒤로 비우는 길 위 거리 (타일)
+
 export const TA = 64.0; // 타일 반 너비 (화면 px)
 export const TB = 26.0; // 타일 반 높이 (사용자 건물 그림들의 평균 각도에 맞춤, 2026-11-14)
 export const K = TB / TA; // 땅에 누운 원의 세로/가로 비
@@ -61,7 +70,8 @@ export function diamond(r: GRect, h = 0.0): V[] {
 
 /**
  * 건물 그림을 땅 격자에 맞추는 값. 그림마다 그린 각도가 조금씩 달라서 (왼쪽 아래 면·오른쪽 아래 면의 기울기),
- * 세로줄은 그대로 두고 살짝 기울이고(c) 세로로 늘리거나 줄여서(d) 바닥 모서리가 격자 방향과 맞게 한다.
+ * 예전엔 세로줄은 그대로 두고 살짝 기울이고(c) 세로로 늘리거나 줄여서(d) 바닥 모서리를 격자 방향에 맞췄으나,
+ * 2026-11-20 사용자 "가게 모양 이상하게 바꾸지 말고 원본대로 넣어 줘" → 지금은 늘 c = 0, d = 1 (그림 그대로, 크기만 k 배).
  * 그리기: 앞 모서리 화면 위치로 옮기고 transform(1, c, 0, d) 후 그림을 (-fx·k, -fy·k) 에 k 배로.
  */
 export interface ArtFit {
@@ -81,6 +91,9 @@ export interface ArtFit {
 export interface BuildingSpec {
   nx: number;
   ny: number;
+  /** 그림 속 바닥 모서리 기울기 (화면, 양수): 왼쪽 면 L→F 가 내려가는 정도 · 오른쪽 면 F→R 이 올라가는 정도 (길 각도 맞추기) */
+  slopeL?: number;
+  slopeR?: number;
   front?: "gx" | "gy";
   art?: ArtFit;
   tall?: number;
@@ -88,24 +101,24 @@ export interface BuildingSpec {
 
 /**
  * 그림 속 바닥 세 꼭짓점 (L 왼쪽 · F 앞 · R 오른쪽, 그림 px) 과 화면 가로 크기 w 로 건물 자리 만들기.
- * 세로 배율은 너무 일그러지지 않게 0.85~1.2 로 묶는다 (그 밖이면 각도가 조금 덜 맞음).
+ * 그림은 기울이거나 늘이지 않고 원본 비율 그대로 (사용자 "원본대로"), 바닥 꼭짓점은 건물 자리(바닥 타일 수)와 앞 모서리 위치에만 씀.
  */
 function fitArt(iw: number, ih: number, L: [number, number], F: [number, number], R: [number, number], w: number, front: "gx" | "gy"): BuildingSpec {
   const k = w / iw;
-  const sL = (F[1] - L[1]) / Math.max(1, F[0] - L[0]);
-  const sR = (F[1] - R[1]) / Math.max(1, R[0] - F[0]);
-  const d = Math.min(1.2, Math.max(0.85, (2 * K) / Math.max(0.05, sL + sR)));
-  const c = (d * (sR - sL)) / 2;
-  return { nx: ((F[0] - L[0]) * k) / TA, ny: ((R[0] - F[0]) * k) / TA, front, art: { k, c, d, fx: F[0], fy: F[1], iw, ih } };
+  const slopeL = (F[1] - L[1]) / Math.max(1, F[0] - L[0]);
+  const slopeR = (F[1] - R[1]) / Math.max(1, R[0] - F[0]);
+  return { nx: ((F[0] - L[0]) * k) / TA, ny: ((R[0] - F[0]) * k) / TA, front, slopeL, slopeR, art: { k, c: 0, d: 1, fx: F[0], fy: F[1], iw, ih } };
 }
 
 // 사용자 그림 (public/assets/art/map/<id>.webp, 배경 오린 뒤 크기 기준). 바닥 꼭짓점은 그림에서 잰 값.
+// 2026-11-20 포장마차·동네분식·해물구이·한잔식당 그림 교체 (사용자 "가게 사진이야, 이걸로 바꿔 줘",
+// art_src/map_<id>.png → tools/cutout_checker.mjs, 예전 원본은 map_<id>_v2)
 export const BUILDINGS: Record<string, BuildingSpec> = {
-  pocha: fitArt(1000, 699, [20, 535], [355, 665], [985, 530], 700, "gx"),
-  bunsik: fitArt(1000, 1193, [100, 1000], [660, 1180], [950, 985], 560, "gy"),
+  pocha: fitArt(1000, 664, [15, 520], [340, 645], [985, 510], 700, "gx"),
+  bunsik: fitArt(1000, 1048, [95, 945], [690, 1042], [975, 880], 560, "gy"),
   market: fitArt(1000, 640, [15, 512], [460, 713], [990, 544], 780, "gx"),
-  beach: fitArt(1000, 817, [20, 650], [350, 805], [985, 650], 660, "gx"),
-  suljip: fitArt(1000, 684, [15, 565], [745, 683], [995, 486], 790, "gy"),
+  beach: fitArt(1000, 716, [10, 615], [330, 712], [990, 590], 660, "gx"),
+  suljip: fitArt(1000, 692, [10, 562], [745, 690], [995, 489], 790, "gy"),
 };
 const LOT_SPEC: BuildingSpec = { nx: 5.0, ny: 5.0, tall: 200.0 };
 
@@ -136,6 +149,7 @@ export interface MapLayout {
   roads: GRect[]; // 길바닥 (낮은 곳) 네모들 — 소품 피하기용 (그리는 길은 roadOutline, 모서리가 둥금)
   endS: number; // 길이 끝나는 곳 (공사 표지)
   corners: Corner[]; // 길이 90도로 꺾이는 곳 (둥글게 그림)
+  zoneS: [number, number][]; // 구역마다 길 위 거리 범위 (그림 지도: 꼭대기 ~ 꼭대기)
 }
 
 /** 길이 꺾이는 곳: 길 위 거리 s, 꺾이는 점, 들어오는 방향·나가는 방향 (땅 좌표 단위 벡터) */
@@ -147,22 +161,40 @@ export interface Corner {
 }
 
 export function zoneX(i: number): number {
-  return i * ZONE_W;
+  return WORLD_ART ? layout().zones[i].x0 : i * ZONE_W;
+}
+
+/** 구역 i 의 가로 가운데 (화면을 그 가게로 옮길 때) */
+export function zoneCenterX(i: number): number {
+  const z = layout().zones[i];
+  return (z.x0 + z.x1) * 0.5;
+}
+
+/** 지도 x 가 속한 구역 번호 */
+export function zoneAt(x: number): number {
+  const zs = layout().zones;
+  for (let i = 0; i < zs.length; i++) if (x < zs[i].x1) return i;
+  return zs.length - 1;
 }
 
 export function worldWidth(): number {
-  return D.SHOPS.length * ZONE_W + LOT_W;
+  return WORLD_ART ? WORLD_W : D.SHOPS.length * ZONE_W + LOT_W;
 }
 
-/** 스테이지 lv 의 길 위 거리 */
+/** 스테이지 lv 의 길 위 거리 (그림 지도: 구역의 길을 꼭대기 앞뒤 EVENT_GAP 만큼 비우고 7칸 고르게) */
 export function levelS(lv: number): number {
   const i = D.shopIndexForLevel(lv);
   const k = D.levelInShop(lv) - 1;
-  return i * 2 * ARM + NODE_S0 + NODE_DS * k;
+  if (!WORLD_ART) return i * 2 * ARM + NODE_S0 + NODE_DS * k;
+  const [a, b] = layout().zoneS[i];
+  const first = i === 0 ? a + EVENT_GAP * 0.8 : a + EVENT_GAP;
+  const span = b - EVENT_GAP - first;
+  return first + (span * k) / (D.LEVELS_PER_SHOP - 1);
 }
 
 /** 미식가 이벤트 발판의 길 위 거리: 그 가게와 다음 가게 사이 (길 꼭대기) */
 export function eventS(shopId: string): number {
+  if (WORLD_ART) return layout().zoneS[D.shopIndex(shopId)][1];
   return (D.shopIndex(shopId) + 1) * 2 * ARM;
 }
 
@@ -179,8 +211,165 @@ function frontOf(i: number): "gx" | "gy" {
 
 let cache: MapLayout | null = null;
 
+/** 화면 좌표(땅 높이) → 땅 좌표 */
+export function gridOf(x: number, y: number): [number, number] {
+  const a = x / TA;
+  const b = (y - OY) / TB;
+  return [(a + b) * 0.5, (b - a) * 0.5];
+}
+
+/**
+ * 길을 가게 건물 각도에 맞춤 (2026-11-20 사용자 "스테이지 길도 현재 가게 위치에 맞게 조금씩 각도를 틀어 줘" — 배경 그림을 없애서 길이 그림을 따를 필요가 없음).
+ * V 바닥(가게 앞, x·y 는 예전 그대로)으로 내려오는 팔은 그 가게 그림의 왼쪽 바닥 모서리와, 올라가는 팔은 오른쪽 바닥 모서리와 거의 나란하게
+ * (예전 격자 기울기 0.4 에서 ROAD_TILT 만큼 그림 쪽으로, 0.18~0.6 사이). 꼭대기 = 두 팔이 만나는 곳. 꺾이는 곳은 둥글게.
+ * false 면 예전처럼 배경 그림에서 딴 길 (map_world.ts WORLD_PATH).
+ */
+export const ROAD_FITS_SHOPS = true;
+const ROAD_TILT = 0.8;
+const ROAD_BASE_SLOPE = 0.4;
+const ROAD_BOTTOM_Y = 946.0;
+const SPUR_PX = 150.0; // ∞ 샛길 길이 (화면 px, 길에 수직)
+
+function roadSlope(edge: number | undefined): number {
+  const e = edge ?? ROAD_BASE_SLOPE;
+  return Math.min(0.6, Math.max(0.18, ROAD_BASE_SLOPE + (e - ROAD_BASE_SLOPE) * ROAD_TILT));
+}
+
+/** 가게 각도에 맞춘 길: [길 점들(화면, x 순서), 구역 경계 꼭대기 x, V 바닥 x] */
+function fittedRoad(): { path: [number, number][]; peaks: number[]; bottoms: number[] } {
+  const n = D.SHOPS.length;
+  const bx = WORLD_BOTTOMS.slice(0, n);
+  const ls = D.SHOPS.map((sh) => roadSlope(BUILDINGS[sh.id]?.slopeL));
+  const rs = D.SHOPS.map((sh) => roadSlope(BUILDINGS[sh.id]?.slopeR));
+  const yB = ROAD_BOTTOM_Y;
+  const ctrl: [number, number][] = [[0, yB - ls[0] * bx[0]]];
+  const peaks: number[] = [];
+  for (let i = 0; i < n; i++) {
+    ctrl.push([bx[i], yB]);
+    if (i < n - 1) {
+      const x = (rs[i] * bx[i] + ls[i + 1] * bx[i + 1]) / (rs[i] + ls[i + 1]);
+      ctrl.push([x, yB - rs[i] * (x - bx[i])]);
+      peaks.push(x);
+    }
+  }
+  const lotX = WORLD_PEAKS[n - 1]; // 끝 빈터와의 경계는 그대로
+  ctrl.push([lotX, yB - rs[n - 1] * (lotX - bx[n - 1])]);
+  peaks.push(lotX);
+  ctrl.push(WORLD_PATH[WORLD_PATH.length - 1]);
+  // 꺾이는 곳 둥글게 (2차 곡선) + 촘촘히
+  const out: [number, number][] = [];
+  const addLine = (a: [number, number], b: [number, number]) => {
+    const steps = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 23));
+    for (let k = out.length === 0 ? 0 : 1; k <= steps; k++) out.push([a[0] + ((b[0] - a[0]) * k) / steps, a[1] + ((b[1] - a[1]) * k) / steps]);
+  };
+  let cur = ctrl[0];
+  for (let k = 1; k < ctrl.length - 1; k++) {
+    const p = ctrl[k - 1], c = ctrl[k], q = ctrl[k + 1];
+    const dp = Math.hypot(p[0] - c[0], p[1] - c[1]);
+    const dq = Math.hypot(q[0] - c[0], q[1] - c[1]);
+    const r = Math.min(150, dp * 0.35, dq * 0.35);
+    const a: [number, number] = [c[0] + ((p[0] - c[0]) / dp) * r, c[1] + ((p[1] - c[1]) / dp) * r];
+    const b: [number, number] = [c[0] + ((q[0] - c[0]) / dq) * r, c[1] + ((q[1] - c[1]) / dq) * r];
+    addLine(cur, a);
+    for (let j = 1; j <= 10; j++) {
+      const t = j / 10;
+      const u = 1 - t;
+      out.push([u * u * a[0] + 2 * u * t * c[0] + t * t * b[0], u * u * a[1] + 2 * u * t * c[1] + t * t * b[1]]);
+    }
+    cur = b;
+  }
+  addLine(cur, ctrl[ctrl.length - 1]);
+  return { path: out, peaks, bottoms: bx };
+}
+
+/** 그림 지도 (WORLD_ART): 사용자 그림의 길 가운데 선을 땅 좌표로 바꿔 길로 쓰고, 꼭대기마다 구역을 나누고, 바닥 앞에 가게 건물 */
+function imageLayout(): MapLayout {
+  const road0 = ROAD_FITS_SHOPS ? fittedRoad() : { path: WORLD_PATH, peaks: WORLD_PEAKS, bottoms: WORLD_BOTTOMS };
+  const PATH = road0.path;
+  const pts: [number, number][] = PATH.map(([x, y]) => gridOf(x, y));
+  const pathS: number[] = [0];
+  for (let k = 1; k < pts.length; k++) pathS.push(pathS[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+  /** 화면 x 에서의 길 위 거리 (길 점은 x 순서) */
+  const sAtX = (x: number): number => {
+    for (let k = 1; k < PATH.length; k++) {
+      if (x <= PATH[k][0]) {
+        const t = (x - PATH[k - 1][0]) / Math.max(1e-6, PATH[k][0] - PATH[k - 1][0]);
+        return pathS[k - 1] + (pathS[k] - pathS[k - 1]) * Math.min(1, Math.max(0, t));
+      }
+    }
+    return pathS[pathS.length - 1];
+  };
+  const gridAtS = (sv: number): [number, number] => {
+    for (let k = 1; k < pts.length; k++) {
+      if (sv <= pathS[k]) {
+        const t = (sv - pathS[k - 1]) / Math.max(1e-6, pathS[k] - pathS[k - 1]);
+        return [pts[k - 1][0] + (pts[k][0] - pts[k - 1][0]) * t, pts[k - 1][1] + (pts[k][1] - pts[k - 1][1]) * t];
+      }
+    }
+    return pts[pts.length - 1];
+  };
+  const n = D.SHOPS.length;
+  const xs = [0, ...road0.peaks];
+  const zoneS: [number, number][] = [];
+  const zones: Zone[] = [];
+  for (let i = 0; i <= n; i++) {
+    const shop = i < n ? D.SHOPS[i] : null;
+    const x0 = xs[Math.min(i, xs.length - 1)];
+    const x1 = i < n ? xs[i + 1] : WORLD_W;
+    zoneS.push([sAtX(x0), sAtX(Math.min(x1, PATH[PATH.length - 1][0]))]);
+    const peak = gridAtS(sAtX(x0));
+    if (shop === null) {
+      const fc: [number, number] = peak;
+      const foot = grect(fc[0] - LOT_SPEC.nx, fc[1] - LOT_SPEC.ny, fc[0], fc[1]);
+      zones.push({
+        index: i, shop: null, x0, x1, peak, corner: peak, front: "gx", spec: LOT_SPEC, foot, frontCorner: fc,
+        spurS: -1, spurBase: fc, spurEnd: fc, notch: null, bounds: specBounds(LOT_SPEC, foot, fc),
+      });
+      continue;
+    }
+    const corner = gridAtS(sAtX(road0.bottoms[i] ?? (x0 + x1) * 0.5));
+    const [cx, cy] = corner;
+    const spec = BUILDINGS[shop.id] ?? { nx: 4.0, ny: 4.0, tall: 240.0 };
+    const front = spec.front ?? frontOf(i);
+    const fc: [number, number] = front === "gx" ? [cx - ROAD - YARD, cy - ROAD - SIDE] : [cx - ROAD - SIDE, cy - ROAD - YARD];
+    const foot = grect(fc[0] - spec.nx, fc[1] - spec.ny, fc[0], fc[1]);
+    zones.push({
+      index: i, shop, x0, x1, peak, corner, front, spec, foot, frontCorner: fc,
+      spurS: 0, spurBase: corner, spurEnd: corner, notch: null, bounds: specBounds(spec, foot, fc),
+    });
+  }
+  const endS = pathS[pathS.length - 1];
+  cache = { zones, width: WORLD_W, pathPts: pts, pathS, roads: [], endS, corners: [], zoneS };
+  // ∞ 샛길: 입구가 보는 팔의 발판(오른쪽 팔 = 가게 안 5번째, 왼쪽 팔 = 3번째)에서 건물 쪽 앞마당으로
+  for (const z of zones) {
+    if (z.shop === null) continue;
+    // 그림 지도는 발판 간격이 좁아서, 오른쪽 팔은 6번째 발판에서 갈라지게 (5번째면 ∞ 글자가 4번째 발판의 새 메뉴 배지와 겹침)
+    const k = z.front === "gx" ? SPUR_NODE_GX + 1 : SPUR_NODE_GY;
+    z.spurS = levelS(z.shop.first_level + k);
+    const base = gridAtS(z.spurS);
+    z.spurBase = base;
+    const off = ROAD + YARD * 0.52;
+    z.spurEnd = z.front === "gx" ? [base[0] - off, base[1]] : [base[0], base[1] - off];
+    if (ROAD_FITS_SHOPS) {
+      // 길 각도가 가게마다 달라져서 격자 방향으로 빼면 옆 발판과 겹침 → 화면에서 길에 수직으로, 위쪽(가게 쪽)으로 SPUR_PX 만큼
+      const p0 = iso(...gridAtS(z.spurS - 0.4));
+      const p1 = iso(...gridAtS(z.spurS + 0.4));
+      const len = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
+      const tx = (p1.x - p0.x) / len;
+      const ty = (p1.y - p0.y) / len;
+      // 길은 늘 오른쪽으로 가므로(tx > 0) (ty, -tx) 가 위쪽(가게 쪽) 법선
+      const nx = ty;
+      const ny = -tx;
+      const b = iso(base[0], base[1]);
+      z.spurEnd = gridOf(b.x + nx * SPUR_PX, b.y + ny * SPUR_PX);
+    }
+  }
+  return cache;
+}
+
 export function layout(): MapLayout {
   if (cache !== null) return cache;
+  if (WORLD_ART) return imageLayout();
   const n = D.SHOPS.length;
   const zones: Zone[] = [];
   const roads: GRect[] = [];
@@ -252,7 +441,8 @@ export function layout(): MapLayout {
     const dout = unit(pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]);
     if (Math.abs(din[0] - dout[0]) + Math.abs(din[1] - dout[1]) > 1e-6) corners.push({ s: pathS[k], p: pts[k], din, dout });
   }
-  cache = { zones, width: worldWidth(), pathPts: pts, pathS, roads, endS: s, corners };
+  const zoneS: [number, number][] = zones.map((_, i) => [i * 2 * ARM, (i + 1) * 2 * ARM]);
+  cache = { zones, width: worldWidth(), pathPts: pts, pathS, roads, endS: s, corners, zoneS };
   return cache;
 }
 

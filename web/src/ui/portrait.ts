@@ -11,21 +11,22 @@ import * as CustomerArt from "../shift/customer_art.ts";
 
 /** 손님 머리 가운데 (0,0) 기준 그림을 그린다 */
 function drawPerson(g: Gfx, regularId: string, mood: string): void {
-  if (regularId === "gourmet") {
-    const gd = D.CUSTOMERS.gourmet;
-    CustomerArt.draw(g, "gourmet", gd.body, gd.hair, v(0, 6), mood, 0.3, 0);
-    return;
-  }
-  const sprites = ArtAssets.customerSpritePool("regular", regularId);
+  // "gourmet:<미식가 id>" = 미식가 스테이지 미식가
+  const sprites = regularId.startsWith("gourmet") ? ArtAssets.customerSpritePool("gourmet", regularId.slice(8)) : ArtAssets.customerSpritePool("regular", regularId);
   if (sprites.length > 0) {
     const img = ArtAssets.customerSprite(sprites[0]);
     if (img === null) return;
-    // 캐릭터 그림은 얼굴 너비 80, 도형 그림 얼굴은 116 → 같은 크기로
+    // 캐릭터 그림을 도형 그림 얼굴(지름 116, 액자 크기 기준)에 맞춰 키움 (영업 화면은 도형 쪽을 PROC_SCALE 로 줄임)
     const ctx = g.ctx;
     ctx.save();
-    ctx.scale(1.45, 1.45);
-    g.texture(img, ArtAssets.customerSpriteRect(sprites[0], ArtAssets.SPRITE_SIZE, v(0, 3)));
+    ctx.scale(1.0 / ArtAssets.PROC_SCALE, 1.0 / ArtAssets.PROC_SCALE);
+    g.texture(img, ArtAssets.customerSpriteRect(sprites[0], ArtAssets.SPRITE_SIZE, v(0, -4), false));
     ctx.restore();
+    return;
+  }
+  if (regularId.startsWith("gourmet")) {
+    const gd = D.CUSTOMERS.gourmet;
+    CustomerArt.draw(g, "gourmet", gd.body, gd.hair, v(0, 6), mood, 0.3, 0);
     return;
   }
   const def = D.CUSTOMERS.regular;
@@ -93,7 +94,7 @@ export function regularPortrait(regularId: string, size: number, met: boolean): 
   });
 }
 
-/** 미식가 황 선생 얼굴 사진 (이벤트 안내·정산·도감) */
-export function gourmetPortrait(size: number, met = true): CanvasWidget {
-  return regularPortrait("gourmet", size, met);
+/** 그 가게 미식가 스테이지 미식가 얼굴 사진 (이벤트 안내·정산) */
+export function gourmetPortrait(shopId: string, size: number, met = true): CanvasWidget {
+  return regularPortrait(`gourmet:${D.eventFor(shopId)?.critic ?? ""}`, size, met);
 }

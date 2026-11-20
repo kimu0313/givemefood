@@ -4,6 +4,7 @@
 // 표정: normal / happy / angry / yuck(덜 익은 걸 먹음) / shock(탄 음식) / confused(다른 메뉴)
 
 import { PI, R, V, WHITE, clamp, fmod, rgb, snapped, v } from "../engine/geom.ts";
+import { tr } from "../i18n/i18n.ts";
 import { measureText, type Gfx } from "../engine/gfx.ts";
 import { Node2D } from "../engine/node.ts";
 import { randi } from "../engine/rng.ts";
@@ -15,9 +16,14 @@ import * as CustomerArt from "./customer_art.ts";
 
 const HEAD_R = 62.0;
 const INK = rgb(0.2, 0.13, 0.09);
-const ICON_W = 112.0; // 말풍선 안 메뉴 하나의 폭
-const BUBBLE_H = 132.0;
-const BUBBLE_GAP = 34.0; // 머리 꼭대기와 말풍선 사이 (꼬리가 들어가는 자리)
+// 2026-11-18 사용자 "주문할 때 음식 그림이 너무 커, 줄여 줘": 그림 1.75 → 1.25배 (약 133 → 95px), 말풍선도 같이 작게
+const ICON_W = 100.0; // 말풍선 안 메뉴 하나의 폭 (예전 124)
+const ICON_S = 1.25; // 말풍선 안 메뉴 그림 배율 (FoodArt.drawIcon, 예전 1.75)
+const BUBBLE_H = 110.0; // (예전 132)
+const BUBBLE_GAP = 34.0; // 머리 옆과 말풍선 사이 (꼬리가 들어가는 자리)
+const SCREEN_W = 1920.0; // 설계 화면 폭 (대사 말풍선이 넘치는지)
+const TAG_Y = 122.0; // 이름표 위쪽 (턱 아래 가슴, 2026-11-17 머리를 키우며 84 → 122)
+const BUBBLE_Y = -30.0; // 주문 말풍선 가운데 높이 (머리 가운데 기준, 눈보다 살짝 위)
 const SAY_FONT = 27;
 const SAY_LINE_H = 34.0;
 
@@ -52,44 +58,28 @@ export class CustomerView extends Node2D {
   private jolt = 0.0; // 반응할 때 몸이 움찔
   private look = 0; // 일반 손님 생김새 (옷·머리색·목도리·머리 모양)
 
-  shopTheme = ""; // 가게 분위기 (해변 = 하와이안 셔츠·비키니, 동네 분식집 = 가방 멘 학생)
-  outfit = ""; // 특별한 차림 (CustomerArt.draw 의 outfit)
-  identity = ""; // 이 손님의 얼굴 (캐릭터 그림 이름 또는 "종류:생김새 번호") — 하루에 한 번만 나오게
+  identity = ""; // 이 손님의 얼굴 (캐릭터 그림 이름 / 단골은 "regular:<id>") — 하루에 한 번만 나오게 (그림이 모자라면 가장 오래전 사람)
 
   /**
    * avoid = 지금 다른 자리에 앉아 있는 손님들의 캐릭터 그림 (같은 사람이 한꺼번에 둘 나오지 않게),
    * usedToday = 오늘 이미 온 얼굴들 (2026-11-16 사용자 "같은 손님이 하루에 여러 번 오거나 동시에 있음").
-   * 단골은 정해진 얼굴. 다른 손님은 반반 확률로 오늘 안 쓴 캐릭터 그림 또는 오늘 안 나온 도형 생김새 (그것 말고는 랜덤).
+   * 단골·미식가·이모는 정해진 얼굴 (그림이 없는 단골만 도형 그림). 보통 손님은 모두 캐릭터 그림
+   * (2026-11-17 사용자 "도형 캐릭터는 단골 빼고 없애 줘", ArtAssets.pickGuestSprite).
    */
   setup(c: CustomerLogic, seat: number, avoid: string[] = [], usedToday: Set<string> | null = null): void {
     this.customer = c;
     this.seat = seat;
     this.look = randi() % 600;
-    const pool = ArtAssets.customerSpritePool(c.typeId, c.regularId);
-    if (c.regularId !== "" || c.typeId === "gourmet") {
+    const pool = ArtAssets.customerSpritePool(c.typeId, c.typeId === "gourmet" ? c.critic : c.regularId);
+    if (c.regularId !== "" || c.typeId === "gourmet" || c.typeId === "imo") {
       if (pool.length > 0) this.spriteName = pool[0];
       this.identity = `regular:${c.regularId || c.typeId}`;
+      // 그 그림을 쓰는 보통 손님이 같은 날 또 오지 않게
+      if (this.spriteName !== "") usedToday?.add(this.spriteName);
     } else {
-      const free = pool.filter((n) => !avoid.includes(n) && !(usedToday?.has(n) ?? false));
-      const useSprite = free.length > 0 && (usedToday === null || randi() % 100 < 50);
-      if (useSprite) {
-        this.spriteName = free[randi() % free.length];
-        this.identity = this.spriteName;
-      } else {
-        // 오늘 안 나온 생김새 번호
-        for (let k = 0; k < 60; k++) {
-          if (!(usedToday?.has(`${c.typeId}:${this.look}`) ?? false)) break;
-          this.look = randi() % 600;
-        }
-        // 동네 차림: 해변 = 하와이안 셔츠 / 비키니 (어른 보통 손님만, 긴 머리), 동네 분식집 = 가방 멘 학생 (보통·급한 손님)
-        const roll = randi() % 100;
-        if (this.shopTheme === "beach" && (c.typeId === "normal" || c.typeId === "hurry") && roll < 65) {
-          this.outfit = c.typeId === "normal" && this.look % 2 === 0 ? "bikini" : "hawaiian";
-        } else if (this.shopTheme === "bunsik" && (c.typeId === "normal" || c.typeId === "hurry") && roll < 55) {
-          this.outfit = "student";
-        }
-        this.identity = `${c.typeId}:${this.look}${this.outfit !== "" ? ":" + this.outfit : ""}`;
-      }
+      this.spriteName = ArtAssets.pickGuestSprite(c.typeId, avoid, usedToday, () => randi());
+      this.identity = this.spriteName;
+      usedToday?.delete(this.identity); // 다시 오면 맨 뒤로 (가장 오래전에 온 사람부터 다시 옴)
     }
     usedToday?.add(this.identity);
     if (c.line !== "") this.say(c.line, 4.0);
@@ -126,7 +116,7 @@ export class CustomerView extends Node2D {
 
   /** 머리 옆 말풍선으로 말하기. 손님끼리 가까워서 말풍선이 옆 손님에 걸칠 수 있으니 말하는 손님을 맨 앞에 그린다 */
   say(text: string, secs: number = D.SAY_TIME): void {
-    this.sayText = text;
+    this.sayText = tr(text); // 줄 나누기·폭 재기 전에 번역
     this.sayDur = secs;
     this.sayT = secs;
     if (this.parent) queueMicrotask(() => this.moveToFront());
@@ -151,22 +141,31 @@ export class CustomerView extends Node2D {
     const happy = this.reactMood === "happy";
     this.jolt = happy ? 0.0 : 1.0;
     if (happy) this.bumpT = 0.9;
-    const line = pickLine(kind, this.customer.typeId, this.customer.regularId);
+    // 미식가는 미식가마다 말투 (D.CRITIC_LINES, "gourmet:<id>")
+    const who = this.customer.typeId === "gourmet" ? this.customer.critic : this.customer.regularId;
+    const line = pickLine(kind, this.customer.typeId, who);
     if (line !== "") this.say(line);
   }
 
-  /** 대사 말풍선의 반대쪽 (식은땀·물음표·연기는 이쪽에 그려서 말풍선과 겹치지 않게) */
+  /** 말풍선 반대쪽 (식은땀·물음표·연기): 주문 말풍선이 오른쪽이라 늘 왼쪽 */
   private away(): number {
-    return this.seat === D.SEATS - 1 ? 1.0 : -1.0;
+    return -1.0;
   }
 
   saying(): string {
     return this.sayT > 0.0 ? this.sayText : "";
   }
 
+  /** 머리 아래로 몸이 이어지는 길이 (노드 기준) — 몸이 짧게 잘린 그림은 카운터에 닿게 조금 낮춰 앉힘 (ShiftView) */
+  bodyBelow(): number {
+    if (this.spriteName !== "") return ArtAssets.spriteBodyBelow(this.spriteName);
+    return 320.0 * ArtAssets.PROC_SCALE; // 도형 그림 외투 끝
+  }
+
+  /** 주문 말풍선: 머리 오른쪽 (2026-11-17 사용자 "말풍선이 머리 위가 아니라 오른쪽에") — 손님 노드 기준 */
   bubbleRect(): R {
     const w = 36.0 + ICON_W * this.customer.items.length;
-    return new R(-w * 0.5, -HEAD_R - BUBBLE_GAP - BUBBLE_H, w, BUBBLE_H);
+    return new R(HEAD_R + BUBBLE_GAP, BUBBLE_Y - BUBBLE_H * 0.5, w, BUBBLE_H);
   }
 
   process(dt: number): void {
@@ -204,7 +203,9 @@ export class CustomerView extends Node2D {
       this.drawOverlays(g, head.add(shake), m);
       return;
     }
-    CustomerArt.draw(g, this.customer.typeId, def.body, def.hair, head, m, this.t, this.seat, this.look, this.customer.regularId, this.outfit);
+    // 도형 그림 (그림이 없는 단골): 캐릭터 그림과 얼굴 크기가 비슷하게 머리 기준으로 줄임
+    g.setTransform(shake.add(head.mul(1.0 - ArtAssets.PROC_SCALE)), 0, ArtAssets.PROC_SCALE);
+    CustomerArt.draw(g, this.customer.typeId, def.body, def.hair, head, m, this.t, this.seat, this.look, this.customer.regularId);
     g.resetTransform();
     this.drawOverlays(g, head.add(shake), m);
   }
@@ -253,17 +254,25 @@ export class CustomerView extends Node2D {
     if (this.customer.typeId === "regular") tag = D.regularDef(this.customer.regularId)?.name ?? "단골";
     else if (this.customer.typeId === "gourmet") {
       // 미식가: 금색 이름표
-      tag = D.CUSTOMERS.gourmet.name;
+      tag = D.criticName(this.customer.critic);
       const gw = 40.0 + tag.length * 24.0;
-      FoodArt.roundedRect(g, new R(-gw * 0.5, 84, gw, 42), rgb(0.98, 0.78, 0.26), 21.0, rgb(0.42, 0.24, 0.05), 4);
-      FoodArt.text(g, tag, v(0, 105), 24, rgb(0.35, 0.18, 0.04), gw);
+      FoodArt.roundedRect(g, new R(-gw * 0.5, TAG_Y, gw, 42), rgb(0.98, 0.78, 0.26), 21.0, rgb(0.42, 0.24, 0.05), 4);
+      FoodArt.text(g, tag, v(0, TAG_Y + 21.0), 24, rgb(0.35, 0.18, 0.04), gw);
+      return;
+    }
+    else if (this.customer.typeId === "imo") {
+      // 포장마차 이모: 분홍 이름표
+      tag = D.CUSTOMERS.imo.name;
+      const iw = 40.0 + tag.length * 24.0;
+      FoodArt.roundedRect(g, new R(-iw * 0.5, TAG_Y, iw, 42), rgb(0.98, 0.62, 0.62), 21.0, rgb(0.45, 0.16, 0.16), 4);
+      FoodArt.text(g, tag, v(0, TAG_Y + 21.0), 24, rgb(0.35, 0.08, 0.08), iw);
       return;
     }
     else if (this.customer.typeId !== "normal") tag = D.CUSTOMERS[this.customer.typeId].name;
     if (tag === "") return;
     const w = 40.0 + tag.length * 24.0;
-    FoodArt.roundedRect(g, new R(-w * 0.5, 84, w, 40), rgb(0, 0, 0, 0.55), 20.0);
-    FoodArt.text(g, tag, v(0, 104), 24, rgb(1, 0.95, 0.85), w);
+    FoodArt.roundedRect(g, new R(-w * 0.5, TAG_Y, w, 40), rgb(0, 0, 0, 0.55), 20.0);
+    FoodArt.text(g, tag, v(0, TAG_Y + 20.0), 24, rgb(1, 0.95, 0.85), w);
   }
 
   private drawPatience(g: Gfx): void {
@@ -284,12 +293,13 @@ export class CustomerView extends Node2D {
     const rect = this.bubbleRect().moved(v(this.shake(), 0));
     const border = this.flash > 0.0 ? rgb(0.85, 0.25, 0.6) : rgb(0.3, 0.22, 0.16);
     const cx = rect.center().x;
-    // 꼬리 (머리 쪽으로)
-    const tip = v(cx * 0.4, -HEAD_R - 8.0);
-    g.polygon([v(cx - 18.0, rect.endY - 4.0), v(cx + 18.0, rect.endY - 4.0), tip], border);
+    // 꼬리 (왼쪽 머리 쪽으로, 볼 옆을 가리킴)
+    const ty = BUBBLE_Y + 8.0;
+    const tip = v(HEAD_R + 2.0 + this.shake(), 2.0);
+    g.polygon([v(rect.x + 4.0, ty - 18.0), v(rect.x + 4.0, ty + 18.0), tip], border);
     FoodArt.roundedRect(g, rect, WHITE, 26.0, border, 4);
-    g.polygon([v(cx - 13.0, rect.endY - 6.0), v(cx + 13.0, rect.endY - 6.0), tip.add(v(0, -6))], WHITE);
-    const iconsY = rect.y + 52.0;
+    g.polygon([v(rect.x + 6.0, ty - 13.0), v(rect.x + 6.0, ty + 13.0), tip.add(v(6, 0))], WHITE);
+    const iconsY = rect.y + 43.0;
     if (!this.customer.isOrderReadable()) {
       // 취객: 주문 내용은 전혀 보여주지 않는다
       FoodArt.text(g, "? ? ?", v(cx, iconsY - 6.0), 44, rgb(0.5, 0.35, 0.3));
@@ -298,23 +308,27 @@ export class CustomerView extends Node2D {
     }
     this.customer.items.forEach((it, i) => {
       const c = v(rect.x + 18.0 + ICON_W * (i + 0.5), iconsY);
-      FoodArt.drawIcon(g, it.menu, c, 1.55);
+      FoodArt.drawIcon(g, it.menu, c, ICON_S);
       if (it.served) {
-        FoodArt.roundedRect(g, R.of(c.sub(v(ICON_W * 0.5 - 4.0, 44.0)), v(ICON_W - 8.0, 88.0)), rgb(1, 1, 1, 0.7), 16.0);
-        FoodArt.checkMark(g, c, 1.8, rgb(0.2, 0.65, 0.3));
+        FoodArt.roundedRect(g, R.of(c.sub(v(ICON_W * 0.5 - 4.0, 36.0)), v(ICON_W - 8.0, 72.0)), rgb(1, 1, 1, 0.7), 14.0);
+        FoodArt.checkMark(g, c, 1.5, rgb(0.2, 0.65, 0.3));
       }
     });
   }
 
-  /** 대사 말풍선: 머리 옆. 맨 오른쪽 손님은 왼쪽 아래, 나머지는 오른쪽 위에 띄워서 옆 손님 말풍선과 겹치지 않게 */
+  /**
+   * 대사 말풍선: 주문 말풍선(머리 오른쪽) 아래 오른쪽. 화면 오른쪽 밖으로 넘칠 때만 왼쪽 아래
+   * (왼쪽 옆 손님의 주문 말풍선보다 아래라서 안 겹침)
+   */
   private drawSay(g: Gfx): void {
-    const side = this.seat === D.SEATS - 1 ? -1.0 : 1.0;
     const rows = this.sayText.split("\n");
     let tw = 0.0;
     for (const r of rows) tw = Math.max(tw, measureText(r, SAY_FONT));
     const w = tw + 44.0;
     const h = SAY_LINE_H * rows.length + 26.0;
-    const cy = side > 0.0 ? -34.0 : 70.0;
+    const side = this.position.x + (HEAD_R + 30.0 + w) * this.scale.x > SCREEN_W - 10.0 ? -1.0 : 1.0;
+    const below = BUBBLE_Y + BUBBLE_H * 0.5 + 14.0; // 주문 말풍선 아래
+    const cy = side > 0.0 ? below + h * 0.5 : Math.max(70.0, below + h * 0.5);
     const xNear = HEAD_R + 30.0;
     let rect = new R(side > 0.0 ? xNear : -xNear - w, cy - h * 0.5, w, h);
     // 나타날 때 톡 튀어나오고, 끝날 때 흐려진다

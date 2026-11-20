@@ -6,6 +6,7 @@ import { CookItem } from "../src/core/cook_item.ts";
 import { CustomerLogic, CState } from "../src/core/customer_logic.ts";
 import { ShiftSession } from "../src/core/shift_session.ts";
 import { GourmetLogic } from "../src/core/gourmet_logic.ts";
+import { nextRating, reviewOf } from "../src/core/review.ts";
 import { GameStateClass, SAVE_KEY, ACCOUNTS_KEY, nameError } from "../src/state/game_state.ts";
 import { Rng } from "../src/engine/rng.ts";
 import { ShiftBot } from "./shift_bot.ts";
@@ -211,6 +212,25 @@ function testSessionCapacity(): void {
   big.setupStory(2, 4, 1.0, 1.0, 42);
   big.addIngredient("tteokbokki");
   ok(big.stationItem("pan", 0)!.portions === D.PAN_PORTIONS + 2, `판 키우기 2단계 = 한 판 ${D.PAN_PORTIONS + 2}그릇`);
+  const big5 = new ShiftSession();
+  big5.setupStory(2, 7, 1.0, 1.0, 42);
+  big5.addIngredient("tteokbokki");
+  ok(big5.stationItem("pan", 0)!.portions === 8 && big5.burnerCount === 4, "판 키우기 5단계 = 한 판 8그릇");
+  // 화구 불 조절 (5단계 값 7): 화구 위 음식만 완벽 구간 +75%, 화구 칸은 4칸
+  const ctl = new ShiftSession();
+  ctl.setupStory(11, 7, 1.0, 1.0, 42);
+  const plain = new ShiftSession();
+  plain.setupStory(11, 4, 1.0, 1.0, 42);
+  ok(ctl.burnerCount === 4 && ctl.addIngredient("ramen") === 0 && plain.addIngredient("ramen") === 0, "불 조절 단계도 화구는 4칸");
+  {
+    const a = ctl.stationItem("burner", 0)!;
+    const b = plain.stationItem("burner", 0)!;
+    while (a.isWaitStep()) { a.stepElapsed = a.stepTime("duration"); a.tap(); }
+    while (b.isWaitStep()) { b.stepElapsed = b.stepTime("duration"); b.tap(); }
+    const wa = a.stepTime("perfect_end") - a.stepTime("perfect_start");
+    const wb = b.stepTime("perfect_end") - b.stepTime("perfect_start");
+    ok(approx(wa, wb * 1.75) && approx(a.stepTime("perfect_start"), b.stepTime("perfect_start")), `불 조절 +75%: 라면 완벽 구간 ${wb.toFixed(1)}초 → ${wa.toFixed(1)}초 (시작은 그대로)`);
+  }
 
   const s5 = new ShiftSession();
   s5.setupStory(11, 4, 0.7, 1.0, 42);
@@ -545,7 +565,13 @@ function testShops(): void {
   }
   const market = D.shopDef("market");
   const ms = D.shopLayout(market);
-  ok(ms.length === 6 && D.shopStationSlots(market, "fryer") === 5 && ms[0].first === 0 && ms[5].first === 3 && ms[3].first === 2, "야시장 = 튀김기 3칸 / 화구 1~4 / 튀김기 2칸");
+  ok(
+    ms.length === 6 && D.shopStationSlots(market, "fryer") === 5 &&
+      ms.map((e) => e.kind).join() === "fryer,fryer,burner,burner,burner,burner" && ms[0].first === 0 && ms[1].first === 3 && ms[4].first === 2,
+    "야시장 = 튀김기 3칸 · 튀김기 2칸 붙여서 / 화구 1~4 (같은 도구끼리 붙임)",
+  );
+  ok(D.shopLayout(D.shopDef("beach")).map((e) => e.kind).join() === "grill,grill,burner,burner,burner,burner", "해변 = 석쇠 1·2 붙여서 / 화구 1~4");
+  ok(D.shopLayout(D.shopDef("bunsik")).map((e) => e.kind).join() === "fryer,burner,burner,burner,burner,pot", "분식집 = 튀김기 / 화구 1~4 / 냄비 (다른 도구는 양옆 그대로)");
   ok(D.shopStationKinds(market).length === 2 && D.stationTitle(market, "fryer") === "튀김기", "같은 도구는 한 종류로");
   const pocha = D.shopDef("pocha");
   const pl = D.shopLayout(pocha);
@@ -565,6 +591,21 @@ function testShops(): void {
   }
   ok(D.SHOPS.reduce((n, s) => n + s.menus.length, 0) === Object.keys(D.MENUS).length, "모든 메뉴는 가게 하나에만 속함");
   ok(D.upgradeCost("burners", 0, "pocha") === 5000 && D.upgradeCost("burners", 0, "suljip") > 5000 * 5, "업그레이드 가격은 가게가 바뀔수록 비쌈");
+  // 2026-11-18 사용자 "항목별로 업그레이드 5번, 가격은 점점 비싸지고"
+  for (const id of D.UPGRADE_ORDER) {
+    const lv = D.UPGRADES[id].levels;
+    ok(lv.length === 5, `${id} 업그레이드 5단계`);
+    for (const shop of D.SHOPS) {
+      const c = lv.map((_, i) => D.upgradeCost(id, i, shop.id));
+      ok(c.every((x, i) => i === 0 || x > c[i - 1]), `${shop.id} ${id} 단계마다 더 비쌈 (${c})`);
+    }
+    ok(lv.every((e, i) => i === 0 || e.value > lv[i - 1].value), `${id} 단계마다 효과가 커짐`);
+  }
+  ok([1, 2, 3, 4, 5].map((n) => D.burnersFor(D.UPGRADES.burners.levels[n - 1].value)).join() === "3,4,4,4,4", "화구 칸은 4칸까지 (그 뒤 단계는 불 조절)");
+  ok([3, 4, 5].map((n) => D.burnerPerfectBonus(D.UPGRADES.burners.levels[n - 1].value)).join() === "0.25,0.5,0.75", "3~5단계 불 조절 = 완벽 구간 +25% / +50% / +75%");
+  ok(D.upgradeDesc("burners", 4, "pocha") === "떡볶이 한 판 8그릇" && D.upgradeDesc("burners", 4, "bunsik") === "불 조절: 완벽 구간 +75%", "5단계: 떡볶이 판 8그릇 / 화구 불 조절 +75%");
+  ok(D.migrateUpgradeLevel("heat", 1) === 2 && D.migrateUpgradeLevel("heat", 2) === 4 && D.migrateUpgradeLevel("stove", 1) === 3 && D.migrateUpgradeLevel("burners", 2) === 2, "옛 단계 → 같은 효과 단계");
+  ok(approx(D.UPGRADES.heat.levels[1].value, 0.15) && approx(D.UPGRADES.heat.levels[3].value, 0.3) && approx(D.UPGRADES.stove.levels[2].value, 0.2), "옛 효과(-15%·-30%·+20%)가 새 표에 그대로");
 }
 
 function testNewMenus(): void {
@@ -698,7 +739,7 @@ function testGameState(): void {
   const v3 = newState();
   v3.applySave({ version: 3, level: 14, wallet: 7, level_stars: { "1": 2, "2": 3, "11": 3, "12": 1, "13": 2 }, upgrades: { pocha: { heat: 2 } } });
   ok(v3.level === 11 && v3.starsOf(1) === 3 && v3.starsOf(2) === 5 && v3.starsOf(8) === 5 && v3.starsOf(9) === 1 && v3.starsOf(10) === 3, "버전 3(레벨 10개씩) → 7개로 줄여 옮김, 별은 5개 만점으로");
-  ok(v3.upgradeLevel("heat", "pocha") === 2 && v3.wallet === 7, "버전 3 업그레이드·지갑 유지");
+  ok(v3.upgradeLevel("heat", "pocha") === 4 && approx(v3.heatScale("pocha"), 0.7) && v3.wallet === 7, "버전 3 업그레이드(화력 -30%)·지갑 유지 → 5단계 표의 같은 효과 단계(4)");
   const v3b = newState();
   v3b.applySave({ version: 3, level: 10, level_stars: { "8": 2, "9": 3 } });
   ok(v3b.level === 7 && !v3b.levelCleared(7) && v3b.starsOf(6) === 3, "버전 3 포장마차 레벨 10 도전 중 → 스테이지 7 도전");
@@ -735,37 +776,93 @@ function testAccounts(): void {
   g.loadGame();
   ok(g.account === "" && g.accounts.length === 0 && g.saveKey() === SAVE_KEY, "처음엔 게스트, 저장 칸은 예전 그대로");
   ok(nameError("") !== "" && nameError(" a ") !== "" && nameError("가나다라마바사아자차카") !== "" && nameError(" 김  사장 ") === "", "이름 길이 2~10글자, 공백은 다듬음");
-  ok(!g.login("a").ok && g.account === "", "짧은 이름은 로그인 안 됨");
+  ok(!g.signUp("a", "1234").ok && g.account === "", "짧은 아이디는 가입 안 됨");
+  ok(!g.login("없는사람", "1234").ok && g.account === "", "없는 아이디는 로그인 안 됨 (회원가입으로)");
+  ok(!g.signUp("김사장님", "12").ok, "비밀번호는 4글자 이상");
   g.wallet = 5000;
   g.level = 3;
   g.saveGame();
-  const r1 = g.login("  김  사장 ");
+  const r1 = g.signUp("  김  사장 ", "pass1");
   ok(r1.ok && r1.created && r1.carried && g.account === "김 사장" && g.level === 3 && g.wallet === 5000, "새 계정 = 게스트 기록을 옮겨 감");
   ok(!(SAVE_KEY in mem) && `${SAVE_KEY}@김 사장` in mem, "옮긴 뒤 게스트 칸은 비움");
   g.wallet = 9000;
   g.saveGame();
   g.logout();
   ok(g.account === "" && g.level === 1 && g.wallet === D.START_MONEY, "로그아웃하면 빈 게스트 (개업 자금만)");
-  const r2 = g.login("Lee");
+  ok(!g.signUp("김 사장", "zzzz").ok, "이미 있는 아이디는 다시 가입 안 됨");
+  const r2 = g.signUp("Lee", "leepw", false);
   ok(r2.ok && r2.created && !r2.carried && g.level === 1 && g.wallet === D.START_MONEY && g.tutorial === "start", "게스트 기록이 없으면 새 계정은 처음부터 (튜토리얼부터)");
   g.wallet = 70;
   g.logout();
-  const r3 = g.login("김 사장");
+  ok(!g.login("김 사장", "wrong").ok && g.account === "", "비밀번호가 틀리면 로그인 안 됨");
+  const r3 = g.login("김 사장", "pass1");
   ok(r3.ok && !r3.created && g.wallet === 9000 && g.level === 3, "다시 로그인하면 그 계정 기록을 불러옴");
+  ok(!JSON.stringify(JSON.parse(mem[ACCOUNTS_KEY])).includes("pass1"), "비밀번호는 그대로 저장하지 않음 (해시)");
   const g2 = new GameStateClass();
   g2.store = store;
   g2.loadGame();
   ok(g2.account === "김 사장" && g2.wallet === 9000 && g2.accounts.length === 2, "새로 켜도 로그인 상태·기록 유지");
-  ok(g2.findAccount("lee") === "Lee" && g2.login("LEE").ok && g2.account === "Lee" && g2.wallet === 70, "영문 대소문자는 같은 계정");
+  ok(g2.findAccount("lee") === "Lee" && g2.login("LEE", "leepw", false).ok && g2.account === "Lee" && g2.wallet === 70, "영문 대소문자는 같은 계정");
   ok(JSON.parse(mem[ACCOUNTS_KEY]).current === "Lee", "계정 목록에 지금 계정 기록");
+  const g3 = new GameStateClass();
+  g3.store = store;
+  g3.loadGame();
+  ok(g3.account === "" && g3.lastAccount === "Lee" && !g3.autoLogin, "자동 로그인을 끄고 로그인했으면 다음엔 게스트로 (아이디 칸엔 마지막 아이디)");
+  ok(g3.resetPassword("lee", "newpw") === "" && !g3.login("Lee", "leepw").ok && g3.login("Lee", "newpw").ok, "비밀번호 다시 정하기 (이 기기 계정)");
+  // 예전에 이름만으로 만든 계정 (비밀번호 없음): 처음 로그인할 때 적은 비밀번호가 그 계정 비밀번호
+  const reg = JSON.parse(mem[ACCOUNTS_KEY]);
+  reg.names.push("옛날손님");
+  mem[ACCOUNTS_KEY] = JSON.stringify(reg);
+  const g4 = new GameStateClass();
+  g4.store = store;
+  g4.loadGame();
+  ok(!g4.hasPassword("옛날손님") && g4.login("옛날손님", "old1").ok && g4.hasPassword("옛날손님") && !g4.login("옛날손님", "zzzz").ok, "비밀번호 없던 예전 계정은 처음 적은 비밀번호로 정해짐");
+  // 디버그 ?debug=clear 는 이 기기의 모든 저장 칸에 (게스트로 켜 놓고 나중에 로그인해도 다 깬 상태)
+  const g5 = new GameStateClass();
+  g5.store = store;
+  g5.loadGame();
+  const before = g5.account;
+  g5.debugEverySlot(() => g5.debugClearAll());
+  ok(g5.account === before && g5.storyCleared && g5.level === D.TOTAL_LEVELS, "디버그: 지금 계정이 다 깬 상태로 돌아옴");
+  ok(["", ...g5.accounts].every((n) => JSON.parse(mem[g5.saveKey(n)]).level === D.TOTAL_LEVELS), "디버그: 게스트 + 모든 계정 저장 칸이 다 깬 상태");
+  g5.logout();
+  ok(g5.login("김 사장", "pass1").ok && g5.storyCleared && g5.wallet >= 1000000, "디버그 뒤 다른 계정으로 로그인해도 다 깬 상태");
+}
+
+/** 포장마차 이모: 두 번째 가게 첫 스테이지 첫 손님으로 딱 한 번 (축하 인사, 가격 무관, 완벽하면 팁 + 한마디) */
+function testImo(): void {
+  const bl = D.shopDef(D.IMO_SHOP).first_level;
+  const s = new ShiftSession();
+  s.setupStory(bl, D.BASE_BURNERS, 1.0, 1.0, 7);
+  s.cameo = "imo";
+  s.useMarket({ ramen: "pricey" }, 3.0);
+  const said: string[] = [];
+  s.customerReacted.connect((_seat, kind) => said.push(kind));
+  for (let i = 0; i < 600 && s.seatedCount() < 1; i++) s.update(0.1);
+  const seat = s.seats.findIndex((c) => c !== null);
+  const imo = s.seats[seat]!;
+  ok(imo.typeId === "imo" && imo.line === D.IMO_HELLO && !imo.priceSensitive(), "두 번째 가게 첫 손님 = 이모 (축하 인사, 가격 무관)");
+  for (let i = 0; i < 400 && s.seatedCount() < 3; i++) s.update(0.1);
+  ok(s.seats.filter((c) => c !== null && c.typeId === "imo").length === 1, "이모는 그날 한 번만");
+  const g = new GameStateClass();
+  ok(g.imoComesTo(bl) && !g.imoComesTo(bl + 1) && !g.imoComesTo(1), "이모는 두 번째 가게 첫 스테이지에만");
+  g.markImoVisited();
+  const g2 = new GameStateClass();
+  g2.applySave(JSON.parse(JSON.stringify(g.saveData())));
+  ok(!g.imoComesTo(bl) && g2.imoVisited && !g2.imoComesTo(bl), "한 번 다녀가면 다시 안 옴 (저장됨)");
+  ok(D.reactionLines("tip", "imo").length > 0 && D.reactionLines("imo_bye", "imo").length > 0 && !D.CUSTOMER_ORDER.includes("imo"), "이모 대사 있음, 무작위 손님에는 없음");
+  void said;
 }
 
 /** 미식가 이벤트: 코스 주문·점수·늦음, 영업 세션, 한 번만 도전, 보상, 저장 */
 function testEvents(): void {
-  ok(D.EVENTS.length === D.SHOPS.length - 1 && D.EVENTS.every((e, i) => e.shop === D.SHOPS[i].id), "가게와 가게 사이마다 미식가 이벤트 하나 (마지막 가게 뒤엔 없음)");
+  ok(D.EVENTS.length === D.SHOPS.length && D.EVENTS.every((e, i) => e.shop === D.SHOPS[i].id), "가게마다 미식가 스테이지 하나 (마지막 가게 뒤에도, 2026-11-17)");
+  ok(new Set(D.EVENTS.map((e) => e.critic)).size === D.EVENTS.length && D.EVENTS.every((e) => e.critic in D.CRITICS), "미식가 스테이지마다 다른 미식가");
   ok(D.gourmetGrade(1.0) === 5 && D.gourmetGrade(0.9) === 5 && D.gourmetGrade(0.89) === 4 && D.gourmetGrade(0.0) === 1, "만족도 → 별 1~5");
   const e0 = D.EVENTS[0];
-  ok(D.eventReward(e0, 5) === e0.reward && D.eventReward(e0, 0) === 0 && D.eventReward(e0, 1) === e0.reward / 5, "보상 = 별 수만큼 (0개 = 없음)");
+  ok(D.eventReward(e0, 5) === e0.reward && D.eventReward(e0, 0) === 0 && D.eventReward(e0, 1) === 0 && D.eventReward(e0, 2) === 0 && D.eventReward(e0, 3) === (e0.reward * 3) / 5, "보상 = 별 수만큼 (0개 = 없음, 1·2개 = 혹평이라 없음)");
+  ok(D.FAME_RATING[1] < 0 && D.FAME_RATING[2] < 0 && D.FAME_RATING[3] > 0 && D.FAME_HEADLINES[1].includes("휴업") && D.FAME_CROWD[1].includes("문을 닫"), "별 1·2개 = 혹평 (평점이 떨어짐), 별 1개 = 당분간 휴업");
+  ok(D.EVENTS.every((e) => D.gourmetReview(e.critic, 5) !== D.gourmetReview("", 5) && ["g_perfect", "g_cooked", "g_burnt", "g_raw", "g_late", "g_wrong"].every((k) => D.reactionLines(k, "gourmet", e.critic).length >= 2 && D.reactionLines(k, "gourmet", e.critic) !== D.reactionLines(k, "gourmet"))), "미식가마다 말투 (요리 한마디 · 한줄평)");
 
   const g = new GourmetLogic([["tteokbokki", "eomuk"], ["twigim", "sundae"]], 10.0);
   ok(g.total() === 4 && g.unservedMenus().length === 2 && g.isWaiting(), "미식가 첫 코스 주문");
@@ -809,6 +906,8 @@ function testEvents(): void {
   const loaded = newState();
   loaded.applySave(JSON.parse(JSON.stringify(gs.saveData())));
   ok(loaded.eventPlayed("pocha") && loaded.eventGrade("pocha") === 4 && !loaded.eventPlayed("bunsik"), "저장해도 이벤트 기록 유지");
+  loaded.debugResetEvents();
+  ok(!loaded.eventPlayed("pocha") && loaded.eventOpen("pocha") && loaded.eventGrade("pocha") === 0, "디버그 ?debug=events: 미식가 스테이지를 안 한 걸로 (다시 열림)");
 
   // 봇: 빠르고 정확하면 별 4~5개, 아주 느리면 5개는 못 받음 (보스답게)
   for (const e of D.EVENTS) {
@@ -883,7 +982,12 @@ function testRegularsAndStock(): void {
 
   const gs = newState();
   ok(gs.wallet === D.START_MONEY && gs.tutorial === "start" && gs.stockOf("pocha", "tteokbokki") === 0, "새 게임: 개업 자금 + 튜토리얼 + 재료 없음");
-  ok(gs.buyStock("pocha", "tteokbokki", 10) && gs.stockOf("pocha", "tteokbokki") === 10 && gs.wallet === D.START_MONEY - 7500, "재료 10인분 사기");
+  ok(D.START_MONEY === 0 && gs.tutorialFreeTotal() === 10 && gs.stockCost("pocha", "tteokbokki", 5) === 0 && gs.stockCost("pocha", "sundae", 5) > 0, "처음 돈 0원, 튜토리얼 장보기의 떡볶이 하루치만 공짜");
+  ok(gs.buyStock("pocha", "tteokbokki", 10) && gs.stockOf("pocha", "tteokbokki") === 10 && gs.wallet === 0, "튜토리얼 떡볶이 10인분은 0원으로 삼");
+  ok(gs.stockCost("pocha", "tteokbokki", 5) === 5 * D.ingredientCost("tteokbokki") && !gs.buyStock("pocha", "tteokbokki", 5), "공짜는 하루치까지만 (그 뒤는 돈)");
+  const skip = newState();
+  skip.setTutorial("");
+  ok(skip.stockOf("pocha", "tteokbokki") === 10 && skip.stockCost("pocha", "tteokbokki", 5) > 0, "장보기 전에 튜토리얼을 건너뛰어도 공짜 떡볶이는 받음");
   gs.wallet = 100000;
   ok(gs.buyStock("pocha", "tteokbokki", 100) && gs.stockOf("pocha", "tteokbokki") === D.STOCK_MAX && !gs.buyStock("pocha", "tteokbokki", 5), "창고 최대까지만, 가득 차면 못 삼");
   gs.wallet = 100;
@@ -950,7 +1054,8 @@ function testSignAndMagic(): void {
   ok(m.result().powder_used === 1, "결과에 쓴 가루");
 
   const gs = newState();
-  ok(gs.buyPowder() && gs.powder === 1 && gs.wallet === D.START_MONEY - D.POWDER_PRICE, `마법의 가루 하나 ${D.POWDER_PRICE}원`);
+  gs.wallet = 20000;
+  ok(gs.buyPowder() && gs.powder === 1 && gs.wallet === 20000 - D.POWDER_PRICE, `마법의 가루 하나 ${D.POWDER_PRICE}원`);
   gs.wallet = 1000000;
   for (let i = 0; i < 20; i++) gs.buyPowder();
   ok(gs.powder === D.POWDER_MAX, `가루는 ${D.POWDER_MAX}개까지`);
@@ -965,11 +1070,93 @@ function MENUS_STEP(item: CookItem): D.StepDef {
   return item.step();
 }
 
+/** 메뉴 가격 단계 (저렴·보통·비쌈), 손님 평가, 실시간 가게 평점, 미식가 유명세 */
+function testPricesAndRating(): void {
+  const perfect = reviewOf({ angry: false, qualities: [Q.PERFECT], priceLevels: ["normal"], priceSensitive: true, patienceRatio: 0.6, magic: false });
+  const pricey = reviewOf({ angry: false, qualities: [Q.PERFECT], priceLevels: ["pricey"], priceSensitive: true, patienceRatio: 0.6, magic: false });
+  const priceyBad = reviewOf({ angry: false, qualities: [Q.COOKED], priceLevels: ["pricey"], priceSensitive: true, patienceRatio: 0.6, magic: false });
+  const cheapBad = reviewOf({ angry: false, qualities: [Q.COOKED], priceLevels: ["cheap"], priceSensitive: true, patienceRatio: 0.6, magic: false });
+  const normalBad = reviewOf({ angry: false, qualities: [Q.COOKED], priceLevels: ["normal"], priceSensitive: true, patienceRatio: 0.6, magic: false });
+  const regPricey = reviewOf({ angry: false, qualities: [Q.COOKED], priceLevels: ["pricey"], priceSensitive: false, patienceRatio: 0.6, magic: false });
+  ok(perfect.score === 5 && pricey.score < perfect.score && pricey.tag === "pricey", "비싸면 완벽해도 평가가 깎이고 '비싸요'");
+  ok(priceyBad.score < pricey.score && priceyBad.score < normalBad.score, "비싼데 덜 완벽하면 더 크게 깎임");
+  ok(cheapBad.score > normalBad.score && cheapBad.tag === "cheap", "저렴하면 조금 실수해도 후함 ('가성비')");
+  ok(regPricey.score === normalBad.score, "단골·미식가는 가격에 영향 없음");
+  ok(reviewOf({ angry: true, qualities: [], priceLevels: [], priceSensitive: true, patienceRatio: 0, magic: false }).score === 1, "화나서 떠나면 1점");
+  ok(nextRating(3.0, 5.0, D.RATING_ALPHA) > 3.0 && nextRating(3.0, 1.0, D.RATING_ALPHA) < 3.0, "평점은 평가 쪽으로 조금씩");
+
+  const s = new ShiftSession();
+  s.setupStory(2, 2, 1.0, 1.0, 6);
+  s.useMarket({ tteokbokki: "pricey", sundae: "cheap" }, 3.0);
+  ok(s.postedPrice("tteokbokki") === 6000 && s.postedPrice("sundae") === 1750 && s.postedPrice("odeng") === D.menuPrice("odeng"), "일반 손님에게 붙는 값: 비쌈 두 배 · 저렴 반값");
+  const said: string[] = [];
+  const reviews: number[] = [];
+  s.customerReacted.connect((_seat, kind) => said.push(kind));
+  s.reviewed.connect((_seat, rv) => reviews.push(rv.score));
+  const norm = new CustomerLogic("normal", ["tteokbokki"]);
+  const reg = new CustomerLogic("regular", ["tteokbokki"]);
+  reg.regularId = "taxi";
+  s.debugSeatCustomer(0, norm);
+  s.debugSeatCustomer(1, reg);
+  const sl0 = s.freeTraySlot("tteokbokki");
+  s.tray[sl0] = { menu: "tteokbokki", quality: Q.COOKED };
+  const r0 = s.serve(sl0, 0);
+  ok(r0.paid === 6000 && said.includes("pricey"), "비싼 메뉴: 일반 손님은 두 배 내고 '너무 비싸요'");
+  const sl1 = s.freeTraySlot("tteokbokki");
+  s.tray[sl1] = { menu: "tteokbokki", quality: Q.PERFECT };
+  const r1 = s.serve(sl1, 1);
+  ok(r1.paid === 3000, "단골은 늘 보통 값");
+  ok(reviews.length === 2 && reviews[0] < 4 && s.rating !== 3.0, `손님이 떠날 때마다 평점이 실시간으로 바뀜 (★${s.rating.toFixed(2)})`);
+  const res = s.result();
+  ok(res.rating_start === 3.0 && res.rating_end === s.rating && (res.review_tags?.pricey ?? 0) === 1, "결과에 평점 변화와 '비싸요' 평 수");
+  // 영업 중 가격 바꾸기: 다음 그릇부터 새 값, 평가는 받을 때 낸 값으로
+  const mid = new ShiftSession();
+  mid.setupStory(2, 2, 1.0, 1.0, 6);
+  mid.useMarket({ tteokbokki: "cheap" }, 3.0);
+  const tags: string[] = [];
+  mid.reviewed.connect((_seat, rv) => tags.push(rv.tag));
+  const m1 = new CustomerLogic("normal", ["tteokbokki", "tteokbokki"]);
+  mid.debugSeatCustomer(0, m1);
+  const ms0 = mid.freeTraySlot("tteokbokki");
+  mid.tray[ms0] = { menu: "tteokbokki", quality: Q.PERFECT };
+  const mr0 = mid.serve(ms0, 0);
+  mid.setPriceLevel("tteokbokki", "pricey");
+  mid.setPriceLevel("tteokbokki", "bogus");
+  const ms1 = mid.freeTraySlot("tteokbokki");
+  mid.tray[ms1] = { menu: "tteokbokki", quality: Q.PERFECT };
+  const mr1 = mid.serve(ms1, 0);
+  ok(mr0.paid === 1500 && mr1.paid === 6000 && mid.priceLevel("tteokbokki") === "pricey", "영업 중에 가격을 바꾸면 다음 그릇부터 그 값 (이상한 단계는 무시)");
+  ok(m1.items[0].priceLevel === "cheap" && m1.items[1].priceLevel === "pricey" && tags[0] === "pricey", "평가는 그릇마다 받을 때의 가격 단계로");
+  const hi = new ShiftSession();
+  hi.setupStory(2, 2, 1.0, 1.0, 6);
+  hi.useMarket({}, 5.0);
+  (hi as unknown as { spawnCustomer(seat: number): void }).spawnCustomer(0);
+  const c5 = hi.seats[0]!;
+  ok(c5.typeId === "regular" || approx(c5.patienceMax, D.CUSTOMERS[c5.typeId].patience * D.ratingPatience(5.0)), "평점이 높으면 일반 손님이 더 기다려 줌");
+
+  const gs = newState();
+  gs.setPrice("pocha", "tteokbokki", "cheap");
+  ok(gs.priceOf("pocha", "tteokbokki") === "cheap" && gs.pricesFor("pocha").sundae === "normal", "가격 단계 저장 (안 정한 메뉴는 보통)");
+  gs.recordResult({ ...result(2, true, 10000, 3), rating_start: 3.0, rating_end: 3.6 });
+  ok(approx(gs.liveRating("pocha"), 3.6) && gs.liveRating("bunsik") === D.RATING_START, "영업이 끝나면 가게 평점 저장");
+  gs.settle(false, false);
+  gs.level = 7;
+  gs.levelStars["7"] = 5;
+  gs.startEvent("pocha");
+  gs.recordResult({ ...result(7, true, 20000, 5), event: true, gourmet: { grade: 5, satisfaction: 0.95, reward: D.eventReward(D.EVENTS[0], 5), perfect: 14, cooked: 1, bad: 0, missed: 0, total: 15 } });
+  const w0 = gs.wallet;
+  gs.settle(false, false);
+  ok(approx(gs.liveRating("pocha"), Math.min(5, 3.6 + D.FAME_RATING[5])) && gs.wallet === w0 + 20000 + D.EVENTS[0].reward, "미식가 극찬 → 가게가 유명해져 평점과 매출이 오름");
+  const back = newState();
+  back.applySave(JSON.parse(JSON.stringify(gs.saveData())));
+  ok(back.priceOf("pocha", "tteokbokki") === "cheap" && approx(back.liveRating("pocha"), gs.liveRating("pocha")), "가격·평점 저장");
+}
+
 function balanceReport(): void {
   console.log("\n-- 밸런스 리포트 (봇: 0.35초마다 1동작, 완벽 구간만 노림, 시드 5개 평균) --");
   const setups = [
     { label: "업그레이드 없음", burners: 2, heat: 1.0, patience: 1.0 },
-    { label: "업그레이드 전부", burners: 4, heat: 0.7, patience: 1.2 },
+    { label: "업그레이드 전부", burners: 7, heat: 0.64, patience: 1.32 }, // 5단계 다 (2026-11-18)
   ];
   for (const setup of setups) {
     console.log(`[${setup.label}]`);
@@ -991,11 +1178,11 @@ function balanceReport(): void {
         `  [${day}] 레벨 ${D.levelInShop(day)}  손님 ${D.levelConfig(day).customers}명  평균 매출 ${D.formatWon(Math.trunc(total / 5))} / 할당량 ${D.formatWon(target)} (${(total / 5 / target).toFixed(2)}배)  통과 ${passed}/5  평균 별 ${(stars / 5).toFixed(1)}  화난 손님 평균 ${(angry / 5).toFixed(1)}`,
       );
       if (D.levelInShop(day) === 1 && setup.burners === 2) ok(passed === 5, `숙련 플레이(봇)는 레벨 ${day}(가게 첫 레벨)를 업그레이드 없이 통과해야 함`);
-      if (setup.burners === 4) ok(passed >= 4, `숙련 플레이(봇)는 업그레이드를 다 하면 레벨 ${day}를 통과해야 함`);
+      if (setup.burners === 7) ok(passed >= 4, `숙련 플레이(봇)는 업그레이드를 다 하면 레벨 ${day}를 통과해야 함`);
     }
   }
   for (const shop of D.SHOPS) {
-    const e = ShiftBot.playLevel(shop.last_level, 4, 0.7, 1.2, 99, true);
+    const e = ShiftBot.playLevel(shop.last_level, 7, 0.64, 1.32, 99, true);
     console.log(`[무한 영업 · ${shop.name}, 업그레이드 전부] 매출 ${D.formatWon(e.revenue)}, ${e.elapsed.toFixed(0)}초 버팀`);
   }
 }
@@ -1018,8 +1205,10 @@ testNewMenus();
 testGameState();
 testAccounts();
 testEvents();
+testImo();
 testRegularsAndStock();
 testSignAndMagic();
+testPricesAndRating();
 if (!process.argv.includes("--quick")) balanceReport();
 console.log(`\n== ${checks} checks, ${fails} failed ==`);
 process.exit(fails > 0 ? 1 : 0);

@@ -16,3 +16,6 @@ web/tests/shots/
 # OS
 Thumbs.db
 .DS_Store
+
+# 배경 그림 내보내기 (node web/tools/export_backgrounds.mjs, map_full.mjs)
+exports/

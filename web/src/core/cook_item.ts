@@ -19,6 +19,7 @@ export class CookItem {
   portions = 1; // 아직 덜어 내지 않은 그릇 수
   portionsMax = 1; // 처음 만든 그릇 수 (1이면 보통 음식)
   magic = false; // 마법의 가루를 뿌림: 빨리 익고, 완벽해지면 끝까지 완벽 (타거나 불지 않음)
+  perfectBonus = 0.0; // 화구 "불 조절" 업그레이드: 완벽 구간(perfect_start~perfect_end)이 이 비율만큼 길어짐 (타는 시각도 그만큼 늦게)
 
   private steps: StepDef[];
 
@@ -47,7 +48,10 @@ export class CookItem {
   }
 
   stepTime(key: "ripe" | "perfect_start" | "perfect_end" | "duration"): number {
-    return (this.step()[key] ?? 0) * this.timeScale;
+    const s = this.step();
+    let t = s[key] ?? 0;
+    if (key === "perfect_end" && this.perfectBonus > 0 && s.kind !== "wait") t += (t - (s.perfect_start ?? 0)) * this.perfectBonus;
+    return t * this.timeScale;
   }
 
   isWaitStep(): boolean {

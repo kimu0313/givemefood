@@ -72,7 +72,7 @@ export const STATIONS: Record<string, StationKindDef> = {
 export const BURNT_COLOR = rgb(0.16, 0.11, 0.09);
 
 // 떡볶이 판·순대 솥 한 번에 만드는 그릇 수. 떡볶이 판은 "판 키우기" 업그레이드(화구 추가 자리)로 1그릇씩 늘어난다
-export const PAN_PORTIONS = 3; // 떡볶이 한 판 (2026-11-16 사용자 "떡볶이 한 번 조리할 때 3인분", 판 키우기로 4 → 5)
+export const PAN_PORTIONS = 3; // 떡볶이 한 판 (2026-11-16 사용자 "떡볶이 한 번 조리할 때 3인분", 판 키우기 5단계로 4 → 8, 2026-11-18)
 export const STEAMER_PORTIONS = 4;
 
 export interface StationSpot {
@@ -428,13 +428,26 @@ export const CUSTOMERS: Record<string, CustomerDef> = {
     body: rgb(0.58, 0.26, 0.26), hair: rgb(0.2, 0.15, 0.12),
     desc: "인내심 25초 · 주문이 흐릿해요. 탭하면 다시 말해요",
   },
+  // 포장마차 이모 (2026-11-17 사용자 "두 번째 가게의 첫 손님은 이모가, 새 가게 산 거 축하하면서 주문, 한 번 나오고 다시 안 나오게"):
+  // 튜토리얼을 알려 준 이모가 두 번째 가게 첫 스테이지의 첫 손님으로 딱 한 번 (IMO_SHOP, GameState.imoVisited). 무작위로는 안 나옴.
+  // 가격에 반응하지 않고, 완벽한 요리엔 단골처럼 기분 좋게 팁 (축하 인사 겸).
+  imo: {
+    name: "포장마차 이모", patience: 45.0, tip_mult: 2.0, unlock_level: 999, weight: 0.0, max_items: 2,
+    body: rgb(0.62, 0.32, 0.3), hair: rgb(0.3, 0.2, 0.12),
+    desc: "새 가게 첫날 축하하러 딱 한 번 와요",
+  },
   // 미식가 이벤트에만 나오는 손님 (인내심은 이벤트마다 EVENTS[].patience)
   gourmet: {
-    name: "미식가 황 선생", patience: 40.0, tip_mult: 3.0, unlock_level: 999, weight: 0.0, max_items: 3,
+    name: "미식가", patience: 40.0, tip_mult: 0.0, unlock_level: 999, weight: 0.0, max_items: 3,
     body: rgb(0.45, 0.16, 0.2), hair: rgb(0.86, 0.85, 0.84),
     desc: "한 번에 여러 가지를 코스로 주문 · 완벽한 요리만 좋아해요",
   },
 };
+
+/** 이모가 첫 손님으로 축하하러 오는 가게 (두 번째 가게) */
+export const IMO_SHOP = "bunsik";
+/** 이모가 들어오며 하는 인사 (새 가게 축하) */
+export const IMO_HELLO = "새 가게 축하해, 사장님!\n이모가 첫 손님 해 주러 왔지~";
 
 // 하루 손님 수 (스테이지 1~35): 첫날 5명 → 마지막 15명. 날이 갈수록 늘어난다 (줄지 않음).
 export const LEVEL_CUSTOMERS = [
@@ -472,27 +485,62 @@ export interface UpgradeLevel {
 }
 
 // 가게마다 따로 산다(새 가게는 장비를 새로 갖춤). cost 는 골목 포장마차 기준, 가게의 upgrade_mult 배.
-// value: burners = 화구 칸 수, heat = 불 쓰는 조리 시간 감소율, stove = 인내심 증가율
+// 2026-11-18 사용자 "항목별로 업그레이드 5번, 가격은 점점 비싸지고": 세 항목 모두 5단계.
+// value: burners = 화구 단계 값 (화구 칸 = min(값, MAX_BURNERS), 떡볶이 판 = panPortions(값),
+//   화구가 4칸을 넘는 값은 "불 조절" = 화구 위 음식의 완벽 구간 +BURNER_CONTROL_STEP × (값 − 4) — 그림 속 화구가 4개뿐이라),
+//   heat = 불 쓰는 조리 시간 감소율, stove = 인내심 증가율
+// 예전(2단계·1단계) 효과는 새 표에 그대로 있음: 화력 -15% = 2단계, -30% = 4단계, 편의시설 +20% = 3단계 (저장 v7 이 옮김)
 export const UPGRADES: Record<string, { name: string; levels: UpgradeLevel[] }> = {
   burners: {
     name: "화구 추가",
     levels: [
       { cost: 5000, value: 3.0, desc: "화구 3칸" },
       { cost: 12000, value: 4.0, desc: "화구 4칸" },
+      { cost: 22000, value: 5.0, desc: "불 조절: 완벽 구간 +25%" },
+      { cost: 36000, value: 6.0, desc: "불 조절: 완벽 구간 +50%" },
+      { cost: 55000, value: 7.0, desc: "불 조절: 완벽 구간 +75%" },
     ],
   },
   heat: {
     name: "화력 강화",
     levels: [
-      { cost: 4000, value: 0.15, desc: "불 쓰는 조리 시간 -15%" },
-      { cost: 9000, value: 0.3, desc: "불 쓰는 조리 시간 -30%" },
+      { cost: 4000, value: 0.08, desc: "불 쓰는 조리 시간 -8%" },
+      { cost: 9000, value: 0.15, desc: "불 쓰는 조리 시간 -15%" },
+      { cost: 16000, value: 0.22, desc: "불 쓰는 조리 시간 -22%" },
+      { cost: 26000, value: 0.3, desc: "불 쓰는 조리 시간 -30%" },
+      { cost: 40000, value: 0.36, desc: "불 쓰는 조리 시간 -36%" },
     ],
   },
   stove: {
     name: "", // 가게의 comfort 이름을 쓴다
-    levels: [{ cost: 6000, value: 0.2, desc: "손님 인내심 +20%" }],
+    levels: [
+      { cost: 6000, value: 0.08, desc: "손님 인내심 +8%" },
+      { cost: 12000, value: 0.14, desc: "손님 인내심 +14%" },
+      { cost: 20000, value: 0.2, desc: "손님 인내심 +20%" },
+      { cost: 32000, value: 0.26, desc: "손님 인내심 +26%" },
+      { cost: 48000, value: 0.32, desc: "손님 인내심 +32%" },
+    ],
   },
 };
+/** 화구 "불 조절" 한 단계 = 화구 위 음식의 완벽 구간이 이 비율만큼 길어짐 (화구 4칸 다음 단계부터) */
+export const BURNER_CONTROL_STEP = 0.25;
+
+/** 화구 단계 값 → 화구 칸 수 (그림 속 화구는 4개까지) */
+export function burnersFor(value: number): number {
+  return clamp(Math.trunc(value), 1, MAX_BURNERS);
+}
+
+/** 화구 단계 값 → 화구 위 음식 완벽 구간 늘어나는 비율 ("불 조절") */
+export function burnerPerfectBonus(value: number): number {
+  return Math.max(0, Math.trunc(value) - MAX_BURNERS) * BURNER_CONTROL_STEP;
+}
+
+/** 저장 v6 이하의 업그레이드 단계 → 지금 단계 (같은 효과인 단계로) */
+export function migrateUpgradeLevel(id: string, lv: number): number {
+  if (id === "heat") return [0, 2, 4][clamp(lv, 0, 2)];
+  if (id === "stove") return lv >= 1 ? 3 : 0;
+  return lv;
+}
 
 export interface RegularDef {
   id: string;
@@ -530,12 +578,29 @@ export function regularsNewAt(shopId: string): RegularDef[] {
 export const INGREDIENT_RATE = 0.25; // 1인분 재료값 = 메뉴 값의 25% (50원 단위)
 export const STOCK_PACK = 5; // 장보기에서 한 번에 사는 양 (인분)
 export const STOCK_MAX = 40; // 메뉴마다 쌓아 둘 수 있는 최대 (인분)
-export const START_MONEY = 20000; // 처음 시작할 때 개업 자금
+// 처음 시작할 때 가진 돈 (2026-11-17 사용자 "처음 시작할 때 가진 돈 0원, 튜토리얼 때 사는 떡볶이는 무료로"; 예전 20,000원).
+// 첫 재료는 튜토리얼 장보기에서 공짜 (GameState.freeStock), 그 뒤엔 영업으로 번 돈 + 모자라면 외상.
+export const START_MONEY = 0;
 export const NEW_SHOP_STOCK = 10;
 // 효과는 게임 안 어디에도 설명하지 않는다 — 써 봐야 안다 (2026-11-16 사용자 "설명 쓰지 마, 플레이어가 모르게, 뭘지 궁금하게").
 // 마법의 가루 (2026-11-16 사용자 "재료 사는 곳에 마법의 가루, 10000원, 음식 넣을 때 사용, 효과는 임의로"):
 // 가루 통을 탭해 준비 → 다음에 올리는 음식에 뿌림 (큰 판·솥은 한 판 전체). 뿌린 음식은 MAGIC_SPEED 배 빨리 익고,
 // 완벽해지면 끝까지 완벽 (타거나 불지 않음), 손님이 감동해서 값을 MAGIC_PRICE_MULT 배로 낸다. 가루는 모든 가게에서 같이 씀.
+// 메뉴 가격 단계 (가게·메뉴마다, 장보기 화면에서 고름). 일반 손님만 이 값을 내고 느낀다 — 단골·미식가는 늘 보통 값, 가격에 반응 안 함
+export const PRICE_LEVELS: Record<string, { mult: number; name: string }> = {
+  cheap: { mult: 0.5, name: "저렴" },
+  normal: { mult: 1.0, name: "보통" },
+  pricey: { mult: 2.0, name: "비쌈" },
+};
+export const PRICE_ORDER = ["cheap", "normal", "pricey"];
+// 가게 평점 (실시간): 손님이 떠날 때마다 그 손님 평가(1~5) 쪽으로 RATING_ALPHA 만큼. 새 가게는 RATING_START 에서 시작
+export const RATING_START = 3.0;
+export const RATING_ALPHA = 0.12;
+/** 평점 → 일반 손님 인내심 배수 (평점 1 = 0.85배, 3 = 1배, 5 = 1.15배) */
+export function ratingPatience(rating: number): number {
+  return 0.85 + 0.075 * (Math.min(5, Math.max(1, rating)) - 1);
+}
+
 export const POWDER_PRICE = 10000;
 export const POWDER_MAX = 9;
 export const MAGIC_SPEED = 2.5;
@@ -577,6 +642,7 @@ export const REACTION_LINES: Record<string, Record<string, string[]>> = {
     hurry: ["바빠 죽겠는데\n덜 익은 걸 주다니!", "기다릴 시간 없어요!\n그냥 갈래요!", "아 진짜,\n시간만 버렸네!"],
     regular: ["사장님,\n오늘 왜 이래요…", "늘 맛있었는데…\n이건 덜 익었어요.", "실망이에요, 사장님.\n오늘은 갈게요."],
     "regular:grandma": ["아이고, 이거\n덜 익었구먼!", "할미 이 다 나가겄어…\n오늘은 그만 갈랴.", "설익은 걸 주면\n쓰나, 응?"],
+    imo: ["아이고, 덜 익었잖아!\n이모가 그렇게 가르쳤어?", "첫날이라 봐준다…\n다음엔 꼭 익혀서 내!"],
     jinsang: ["이걸 돈 받고 팔아요?\n사장 나와!", "리뷰에 다 쓸 거예요!\n별 하나!", "날것을 주다니,\n어이가 없네!"],
     drunk: ["어… 딸꾹…\n이거 차갑잖아~", "으으… 덜 익었어…\n집에 갈래…", "사장님~ 이거\n아직 살아 있어요~"],
   },
@@ -591,6 +657,7 @@ export const REACTION_LINES: Record<string, Record<string, string[]>> = {
     "regular:grandma": ["아이고, 다 탔네!\n그래도 먹어야지.", "불 좀 줄여,\n이 사람아!", "까맣게 탔구먼.\n천천히 혀."],
     jinsang: ["숯불 냄새가 아니라\n숯이잖아!", "이걸 돈 다 받으려고?\n반값만 내요!", "탄 걸 내밀어?\n리뷰 각오해요!"],
     drunk: ["어? 왜 까매…\n딸꾹…", "이거 숯이야~?\n딸꾹!", "까만 떡… 아니\n까만 뭐야 이거…"],
+    imo: ["어이쿠, 다 탔네!\n불 조심하라 했지?", "탄 건 이모가\n봐줄게, 다음엔 조심!"],
   },
   wrong: {
     normal: ["이거 시킨 거\n아닌데요?", "제가 주문한 건\n이게 아니에요.", "다른 손님 거\n아니에요?"],
@@ -599,6 +666,7 @@ export const REACTION_LINES: Record<string, Record<string, string[]>> = {
     "regular:grandma": ["이거 내 거\n아닌디?", "할미는 이거\n안 시켰어~"],
     jinsang: ["주문도 제대로\n못 받아요?", "내가 언제\n이걸 시켰어요?"],
     drunk: ["이거… 내가\n시켰나…? 딸꾹", "음~ 이건\n내 거 아닌 듯~"],
+    imo: ["이모가 시킨 건\n이게 아닌데~?", "주문 다시 봐 봐,\n사장님!"],
   },
   // 단골이 완벽한 요리를 받고 팁을 줄 때 한마디: 단골인 게 티 나는 말만, 팁·돈 얘기는 직접 하지 않음
   // (2026-11-16 사용자 "팁을 준다는 말은 직접적으로 안 했으면, 단골이라는 티만 나게")
@@ -610,12 +678,28 @@ export const REACTION_LINES: Record<string, Record<string, string[]>> = {
     "regular:student": ["역시 단골집은\n못 바꿔요!", "친구들한테\n또 자랑해야지!", "시험 끝나면\n무조건 여기죠!"],
     "regular:cafe": ["역시 여기 오길\n잘했다~", "이 맛 때문에\n또 와요!", "친구들한텐 비밀인\n저만의 맛집이에요!"],
     "regular:guard": ["순찰 끝엔\n역시 여기요.", "늘 먹던 맛이\n제일이오.", "오늘 밤도\n든든하구먼!"],
+    imo: ["역시 내 제자야!\n장사 대박 나라~", "이모가 가르친 보람이\n있네! 잘 먹었어~", "이 맛이면 가게\n금방 소문나겠다!"],
   },
+  // 이모가 (완벽하진 않아도) 다 먹고 일어날 때
+  imo_bye: {
+    imo: ["잘 먹었어, 사장님!\n다음엔 더 맛있게~", "첫날인데 이 정도면\n훌륭해! 힘내!", "잘 먹고 간다~\n가게 번창해라!"],
+  },
+  // 메뉴 값이 '비쌈'일 때 일반 손님이 받고 나서 (완벽하지 않으면 pricey, 완벽해도 가끔 pricey_ok)
+  pricey: {
+    normal: ["헉, 이 가격에\n이 맛이요?", "너무 비싸요…\n별로 안 올래요.", "비싸기만 하네요.", "이 돈이면\n딴 데 가죠."],
+    hurry: ["비싼데 맛도\n그냥 그렇네!", "돈 아깝다…"],
+    jinsang: ["바가지 아니에요?\n리뷰 쓴다!", "이 가격 실화예요?"],
+    drunk: ["딸꾹… 왜 이렇게\n비싸요~", "사장님… 비싸요…\n딸꾹"],
+  },
+  pricey_ok: { normal: ["맛있긴 한데…\n좀 비싸네요.", "음, 가격만\n좀 착했으면.", "비싸도 맛은\n있네요."] },
+  // 메뉴 값이 '저렴'일 때 조금 덜 된 음식에도 너그럽게
+  cheap_ok: { normal: ["싸니까 이 정도면\n괜찮아요!", "가격 착하네요~\n또 올게요.", "이 가격에 이 맛이면\n충분하죠!"] },
   // 마법의 가루를 뿌린 요리를 받았을 때 (감동, 값 2배)
   magic: {
     normal: ["우와!! 이게 무슨\n맛이에요?!", "입에서 별이\n터지는 맛!", "이건… 마법이야!"],
     regular: ["사장님, 오늘 비법이\n뭐예요?!", "단골인 저도\n처음 먹는 맛!", "와… 또 반했어요!"],
     "regular:grandma": ["아이고, 이게 웬\n신선놀음이여!", "할미 평생\n이런 맛 처음이여!"],
+    imo: ["이게 무슨 맛이야?!\n이모도 처음 먹어 봐!", "어디서 이런 비법을\n배웠어?!"],
     drunk: ["딸꾹… 별이\n보여요~ 반짝반짝~", "이 맛에 술이\n다 깨네!"],
     jinsang: ["…인정. 맛있네요.", "이건 리뷰에\n별 다섯 개!"],
   },
@@ -627,8 +711,60 @@ export const REACTION_LINES: Record<string, Record<string, string[]>> = {
   g_late: { normal: ["너무 늦는군…\n다음 요리 주게.", "기다리다\n식욕이 떨어졌어.", "시간도 맛의\n일부라네."] },
   g_wrong: { normal: ["내가 시킨 건\n이게 아닐세.", "주문을 다시\n보게나."] },
 };
+// 미식가마다 말투 (2026-11-20 사용자 "미식가 말투 다르게"): 요리를 받을 때마다 하는 말. REACTION_LINES[kind]["gourmet:<id>"] 로 들어감
+//   모두 음식평론가 (사용자: 기자·작가·교수 같은 사람은 없음, 취재·특종·1면·오보·헤드라인 같은 말 금지). 말투는 성격으로만 다름:
+//   강 = 짧고 냉정 · 서 = 부드럽고 감성적 · 한 = 꼼꼼하게 점수 매김 · 황 = 옛날 어르신 (자네·~구먼) · 백 = 우아하고 깍듯 (어머·~네요)
+export const CRITIC_LINES: Record<string, Record<string, string[]>> = {
+  kang: {
+    g_perfect: ["…인정하죠. 훌륭해요.", "군더더기 없는\n맛이군요.", "이 정도면\n합격입니다."],
+    g_cooked: ["무난해요.\n그래서 문제고요.", "기억에 남을\n맛은 아니네요."],
+    g_burnt: ["탄 맛이\n다 덮어 버렸군요.", "불 조절,\n기본 아닌가요?"],
+    g_raw: ["덜 익었네요.\n확인도 안 했나요?", "이걸 그대로\n내보내다니요."],
+    g_late: ["기다리게 하는 건\n실례죠.", "시간도 맛이에요.\n늦었습니다."],
+    g_wrong: ["제 주문이\n아닌데요.", "주문부터\n다시 확인하시죠."],
+  },
+  seo: {
+    g_perfect: ["이 한 입에\n계절이 담겼네요.", "향이 오래\n머무는 맛이에요.", "아… 마음까지\n따뜻해지네요."],
+    g_cooked: ["나쁘진 않지만…\n여운이 없네요.", "무난해요.\n설렘이 없을 뿐."],
+    g_burnt: ["쓴맛만\n남았네요.", "탄 향이\n모든 걸 가렸어요."],
+    g_raw: ["아직 덜 피어난\n꽃 같아요.", "속이 덜 익었어요.\n조금만 더 기다리지."],
+    g_late: ["기다림도 맛이라지만…\n너무 길어요.", "음식이 식어 가는\n소리가 들려요."],
+    g_wrong: ["제가 고른 맛이\n아니에요.", "어머, 다른 음식이\n왔네요?"],
+  },
+  han: {
+    g_perfect: ["온도, 식감, 간…\n모두 만점입니다.", "흠잡을 데가\n없군요. 100점.", "균형이 완벽합니다."],
+    g_cooked: ["70점입니다.\n노력은 보이네요.", "평균은 넘지만\n특출나진 않군요."],
+    g_burnt: ["가열 시간 초과.\n감점입니다.", "탄 맛이 납니다.\n기본부터 다시."],
+    g_raw: ["속까지 안 익었어요.\n0점입니다.", "덜 익었습니다.\n감점이 아니라 실격이에요."],
+    g_late: ["제한 시간을\n넘겼습니다. 감점.", "시간 관리도\n실력입니다."],
+    g_wrong: ["주문을 잘못 보셨군요.\n다시 확인하세요.", "제 주문이 아닙니다.\n틀렸어요."],
+  },
+  hwang: {
+    g_perfect: ["허허, 이 맛이구먼!", "자네, 제법이군.\n손맛이 살아 있어.", "옛날 그 맛이\n돌아왔구먼."],
+    g_cooked: ["흠… 그럭저럭이구먼.", "정성이 덜\n들어갔어, 자네."],
+    g_burnt: ["불 앞에서\n한눈을 팔았구먼!", "에잉, 쓴맛이\n혀에 남는구먼."],
+    g_raw: ["덜 익었잖은가!\n성급하구먼.", "날것을 내다니…\n쯧쯧."],
+    g_late: ["늙은이 기다리다\n지치겠구먼.", "음식도 때가\n있는 법일세."],
+    g_wrong: ["내가 시킨 건\n이게 아닐세.", "귀가 어두운 건\n나인가, 자네인가?"],
+  },
+  baek: {
+    g_perfect: ["어머, 이건 고급 요리\n못지않네요.", "우아한 맛이에요.\n마음에 들어요.", "이 정도면\n제 단골집 하죠."],
+    g_cooked: ["음… 무난하네요.\n그게 전부지만요.", "조금만 더 세심했으면\n좋았을 텐데요."],
+    g_burnt: ["어머나,\n탄 냄새가 나요.", "이건 좀…\n실례 아닌가요?"],
+    g_raw: ["속이 덜 익었네요.\n서두르셨나 봐요.", "어머, 이건 아직\n못 먹겠어요."],
+    g_late: ["숙녀를 이렇게\n기다리게 하다니요.", "시간이\n너무 걸리네요."],
+    g_wrong: ["어머, 제가 주문한 게\n아닌데요?", "주문을 잘못\n들으셨나 봐요."],
+  },
+};
+for (const [critic, kinds] of Object.entries(CRITIC_LINES)) {
+  for (const [kind, lines] of Object.entries(kinds)) {
+    REACTION_LINES[kind] ??= {};
+    REACTION_LINES[kind][`gourmet:${critic}`] = lines;
+  }
+}
+
 export const REACTION_MOODS: Record<string, string> = {
-  raw: "yuck", burnt: "shock", wrong: "confused", tip: "happy", magic: "happy",
+  raw: "yuck", burnt: "shock", wrong: "confused", tip: "happy", magic: "happy", imo_bye: "happy", pricey: "angry", pricey_ok: "confused", cheap_ok: "happy",
   g_perfect: "happy", g_cooked: "confused", g_burnt: "shock", g_raw: "yuck", g_late: "angry", g_wrong: "confused",
 };
 export const SAY_TIME = 2.6; // 말풍선이 떠 있는 시간 (초)
@@ -658,14 +794,32 @@ export interface EventDef {
   patience: number; // 한 번 주문(코스 하나)의 인내심 (초)
   reward: number; // 별 5개일 때 보상
   hello: string; // 들어올 때 한마디
+  critic: string; // 찾아오는 미식가 (CRITICS id, 그림 = customers/guest_critic_<id>.png)
+}
+
+// 미식가 5명 (2026-11-17 사용자 그림 art_src/customers/sheet_gourmets.png, "각 스테이지마다 미식가 이 사람들로,
+// 미식가는 평소에 가게에 안 나타나고 미식 스테이지에만"): 그림 왼쪽부터 가게 순서대로 한 명씩
+export const CRITICS: Record<string, { name: string }> = {
+  kang: { name: "강 평론가" }, // 금발 · 동그란 안경 · 줄무늬 정장, 팔짱
+  seo: { name: "서 평론가" }, // 묶은 머리 · 스카프, 펜과 수첩
+  han: { name: "한 평론가" }, // 네모 안경 · 밝은 정장, 클립보드
+  hwang: { name: "황 평론가" }, // 은발 · 턱수염 · 체크 정장, 턱 괸 손
+  baek: { name: "백 평론가" }, // 은발 · 진주 목걸이, 수첩 (마지막 가게)
+};
+
+/** 그 가게 미식가 이벤트에 오는 미식가 이름 */
+export function criticName(id: string): string {
+  return CRITICS[id]?.name ?? CUSTOMERS.gourmet.name;
 }
 
 // 인내심은 봇(완벽 구간만 노림)으로 맞춤 (tests/run_tests.ts 이벤트 리포트: 0.35~0.9초마다 한 동작 = 별 5개, 느릴수록 줄어듦)
 export const EVENTS: EventDef[] = [
-  { shop: "pocha", rounds: 5, perRound: 3, patience: 20.0, reward: 60000, hello: "포장마차라…\n어디 한번 볼까." },
-  { shop: "bunsik", rounds: 5, perRound: 3, patience: 22.0, reward: 150000, hello: "분식은 기본이\n제일 어렵지." },
-  { shop: "market", rounds: 6, perRound: 3, patience: 22.0, reward: 300000, hello: "야시장 맛,\n기대해도 되겠지?" },
-  { shop: "beach", rounds: 6, perRound: 3, patience: 20.0, reward: 600000, hello: "바다 앞이라고\n봐주진 않네." },
+  { shop: "pocha", rounds: 5, perRound: 3, patience: 20.0, reward: 60000, hello: "포장마차라…\n어디 한번 볼까요.", critic: "kang" },
+  { shop: "bunsik", rounds: 5, perRound: 3, patience: 22.0, reward: 150000, hello: "분식에도 이야기가 있죠.\n한번 맛볼게요.", critic: "seo" },
+  { shop: "market", rounds: 6, perRound: 3, patience: 22.0, reward: 300000, hello: "야시장 맛이라…\n꼼꼼히 따져 보죠.", critic: "han" },
+  { shop: "beach", rounds: 6, perRound: 3, patience: 20.0, reward: 600000, hello: "바다 앞이라고\n봐주진 않네.", critic: "hwang" },
+  // 마지막 가게(실내 포차)도 미식가 스테이지 (2026-11-17, 미식가가 5명이라): 마지막 스테이지를 깨면 지도 끝 꼭대기에 열림
+  { shop: "suljip", rounds: 6, perRound: 3, patience: 20.0, reward: 1000000, hello: "마지막 가게라죠?\n이름값 하는지 볼게요.", critic: "baek" },
 ];
 export const GOURMET_PATIENCE_DECAY = 0.05; // 코스가 하나 지날 때마다 인내심이 이만큼(비율) 줄어든다 (갈수록 까다로워짐)
 export const GOURMET_PATIENCE_MIN = 0.7; // 줄어도 처음의 이 비율까지만
@@ -675,11 +829,67 @@ export const GOURMET_POINTS = [0, 1, 3, 0]; // 품질(Q) → 점수: 덜 익음 
 export const GOURMET_GRADES = [0.35, 0.55, 0.75, 0.9]; // 만족도가 이 값 이상이면 별 2 / 3 / 4 / 5개
 export const GOURMET_VERDICTS = ["", "실망이야", "아쉽군", "나쁘지 않군", "훌륭하군!", "극찬!"];
 // 별 수마다 미식가의 한줄평 (정산 화면 · 도감)
+/**
+ * 미식가마다 한줄평 (별 0~5, 0 = 중간에 문을 닫음) — 정산·신문에 나옴 (2026-11-20 말투 다르게).
+ * 2026-11-20 사용자 "별 1·2개일 때는 아주 악담, 별 3개는 예전 별 2개 반응처럼": 1·2 = 혹평, 3 = "가능성은 보인다".
+ */
+export const CRITIC_REVIEWS: Record<string, string[]> = {
+  kang: [
+    "도중에 문을 닫다니… 평가할 것도 없군요.",
+    "최악입니다. 이 집 이름은 오래 기억하겠어요. 나쁜 쪽으로.",
+    "시간 낭비였습니다. 아무에게도 권하지 않겠어요.",
+    "가능성은 봤습니다. 다음엔 실력으로 보여 주시죠.",
+    "다시 오고 싶은 집입니다. 인정하죠.",
+    "올해 먹은 것 중 최고였습니다. 이 집은 꼭 알려야겠군요!",
+  ],
+  seo: [
+    "도중에 문을 닫으셨네요… 아쉬운 저녁이에요.",
+    "오래도록 씁쓸한 기억으로 남겠네요. 다시는 오고 싶지 않아요.",
+    "한 입 먹고 수저를 내려놓고 싶었어요.",
+    "몇 가지는 빛났어요. 조금 더 다듬어 보세요.",
+    "다시 찾고 싶은, 따뜻한 집이에요.",
+    "오래도록 그리울 맛이에요. 제 마음속 최고의 집이에요!",
+  ],
+  han: [
+    "도중에 문을 닫다니… 점수를 매길 수 없습니다.",
+    "0점. 요리라고 부를 수도 없군요. 장사를 다시 생각해 보세요.",
+    "20점. 기본부터 전부 틀렸습니다.",
+    "60점. 가능성은 보입니다. 불 조절부터.",
+    "90점. 다시 찾아올 가치가 있는 집입니다.",
+    "100점 만점. 흠잡을 곳이 하나도 없습니다!",
+  ],
+  hwang: [
+    "문을 닫아 버리다니… 다음 기회는 없네.",
+    "에잉, 퉤! 내 평생 이런 걸 돈 받고 파는 집은 처음일세.",
+    "이걸 음식이라고 내놓다니, 간판 내리게.",
+    "가능성은 보이네. 불 조절부터 다시 하게.",
+    "다시 오고 싶은 집이구먼. 칭찬하지.",
+    "내 평생 최고의 한 끼였네. 이 집은 꼭 기록해 두지!",
+  ],
+  baek: [
+    "어머, 도중에 문을 닫다니요… 아쉽네요.",
+    "어머, 제 혀가 다 상했네요. 다신 이 근처에도 안 올 거예요.",
+    "친구들한테 절대 가지 말라고 해야겠어요.",
+    "가능성은 있어요. 다듬으면 빛나겠네요.",
+    "친구들을 데려오고 싶은 집이에요.",
+    "제 인생 최고의 한 끼였어요. 이 집, 소문내야겠어요!",
+  ],
+};
+
+/** 그 미식가의 한줄평 (없으면 공통) */
+export function gourmetReview(critic: string, grade: number): string {
+  const g = clamp(grade, 0, MAX_STARS);
+  return CRITIC_REVIEWS[critic]?.[g] ?? GOURMET_REVIEWS[g];
+}
+
+/** 이 별 수 이하면 혹평 (악담 · 손님이 끊김 · 평점이 떨어짐 · 유명세 매출 없음). 별 1개 = 당분간 휴업 */
+export const BAD_GRADE = 2;
+
 export const GOURMET_REVIEWS = [
   "중간에 문을 닫다니… 다음 기회는 없네.",
-  "이건 요리가 아니라 연습이군.",
+  "최악이군. 이런 걸 돈 받고 팔다니.",
+  "시간 낭비였네. 다시는 안 오겠어.",
   "가능성은 보이네. 불 조절부터 다시 하게.",
-  "평범하지만 정직한 맛이야.",
   "다시 오고 싶은 집이군. 칭찬하지.",
   "내 인생 최고의 한 끼였네. 이 집은 꼭 기록해 두지!",
 ];
@@ -699,8 +909,31 @@ export function gourmetGrade(satisfaction: number): number {
   return n;
 }
 
-/** 별 수에 따른 보상 (0개 = 중간에 나감 = 없음) */
+// 미식가 리뷰가 실리면 (2026-11-16 사용자 "두 배 지불 말고 스토리: 좋은 평가를 남겨 가게가 유명해져 손님이 몰렸다, 매출이 올랐다"):
+// 별 수만큼 가게가 유명해져 그 가게 평점이 오르고 (FAME_RATING), 몰려든 손님 덕에 매출이 오른다 (eventReward)
+// 2026-11-20 사용자 "별 1·2개는 악담, 별 3개는 예전 별 2개 반응": 1·2 = 혹평이라 평점이 떨어짐, 3 = 예전 2 만큼
+export const FAME_RATING = [0, -0.5, -0.3, 0.15, 0.6, 1.0];
+// 이야기 장면: 신문 제목 (별 0~5) — %s = 가게 이름
+export const FAME_HEADLINES = [
+  "",
+  "%s, 미식가 혹평 \"다시는 가지 말 것\"… 결국 당분간 휴업",
+  "%s, 미식가 \"돈이 아깝다\" 혹평 세례",
+  "%s, 미식가 평가 별 셋 \"가능성은 보인다\"",
+  "\"다시 오고 싶은 집\" %s, 미식가 별 넷!",
+  "\"인생 최고의 한 끼\" %s, 미식가 극찬!",
+];
+export const FAME_CROWD = [
+  "",
+  "혹평이 퍼져 손님 발길이 뚝 끊겼어요… 가게는 당분간 문을 닫기로 했어요.",
+  "나쁜 소문이 돌아 오던 손님마저 발길을 돌렸어요…",
+  "소문을 듣고 찾아오는 손님이 몇 명 늘었어요.",
+  "소문이 퍼져 손님이 부쩍 늘었어요! 줄 서는 날도 생겼어요.",
+  "가게 앞에 줄이 끝도 없이 늘어섰어요! 동네 최고의 맛집이 됐어요!",
+];
+
+/** 별 수에 따른 유명세 매출 (0개 = 중간에 나감, 1·2개 = 혹평이라 손님이 끊김 → 없음) */
 export function eventReward(e: EventDef, grade: number): number {
+  if (grade <= BAD_GRADE) return 0;
   return roundHalfAway((e.reward * clamp(grade, 0, MAX_STARS)) / MAX_STARS);
 }
 
@@ -762,6 +995,8 @@ export function shopOpenCost(id: string): number {
 /**
  * 조리대 칸 배치 (왼쪽부터): {kind, slots, title, first, width, grid}.
  * sides 가게 = [왼쪽 도구, 화구 1, 화구 2, 화구 3, 화구 4, 오른쪽 도구], stations 가게 = 그 목록 그대로.
+ * 양옆 도구가 같은 종류면(야시장 튀김기 1·2, 해변 석쇠 1·2) 둘을 붙여 왼쪽에 두고 화구 4칸은 그 오른쪽에
+ * (2026-11-16 사용자 "튀김기 화구 튀김기 이렇게 두지 말고 같은 조리도구끼리는 붙여줘").
  * first = 그 도구 안에서 이 칸이 맡는 첫 번호 (같은 종류가 여러 곳이면 앞 칸 다음부터: 야시장 튀김기 3칸 + 2칸)
  */
 export function shopLayout(shop: ShopDef): LayoutEntry[] {
@@ -770,9 +1005,10 @@ export function shopLayout(shop: ShopDef): LayoutEntry[] {
     src = shop.stations;
   } else {
     const sides = shop.sides!;
-    src.push(sides[0]);
-    for (let k = 0; k < MAX_BURNERS; k++) src.push({ kind: STATION_BURNER, slots: 1, title: `화구 ${k + 1}` });
-    src.push(sides[1]);
+    const burners: StationSpot[] = [];
+    for (let k = 0; k < MAX_BURNERS; k++) burners.push({ kind: STATION_BURNER, slots: 1, title: `화구 ${k + 1}` });
+    if (sides[0].kind === sides[1].kind) src.push(sides[0], sides[1], ...burners);
+    else src.push(sides[0], ...burners, sides[1]);
   }
   const out: LayoutEntry[] = [];
   const used: Record<string, number> = {};

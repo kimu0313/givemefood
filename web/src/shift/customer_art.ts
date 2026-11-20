@@ -2,7 +2,7 @@
 //   normal  더플코트 + 체크 목도리      hurry   패딩 + 후드 + 식은땀
 //   regular 집업 점퍼 + 야구 모자       jinsang 가죽 재킷 + 선글라스 + 금목걸이
 //   drunk   정장 + 풀린 넥타이 + 넥타이 머리띠
-//   gourmet 미식가 황 선생 (이벤트): 베레모 + 동그란 안경 + 회색 콧수염 + 자주색 재킷 + 나비넥타이
+//   gourmet 황 평론가 (이벤트): 베레모 + 동그란 안경 + 회색 콧수염 + 자주색 재킷 + 나비넥타이
 // 표정 m: normal / happy / angry / yuck / shock / confused
 
 import { Color, PI, R, TAU, V, WHITE, fmod, lerp, rgb, v } from "../engine/geom.ts";
@@ -101,7 +101,7 @@ const REGULAR_LOOKS: Record<string, RegularLook> = {
   grandma: { body: rgb(0.74, 0.44, 0.56), hair: rgb(0.88, 0.87, 0.86), cardigan: true, perm: true }, // 할머니: 분홍 가디건 + 흰 파마
 };
 
-/** 미식가 황 선생 (이벤트 보스 손님) — 단골 그림 틀에 베레모·나비넥타이 */
+/** 황 평론가 (이벤트 보스 손님) — 단골 그림 틀에 베레모·나비넥타이 */
 const GOURMET_LOOK: RegularLook = {
   body: rgb(0.45, 0.16, 0.2), hair: rgb(0.86, 0.85, 0.84), beret: rgb(0.18, 0.16, 0.2), bowtie: rgb(0.86, 0.66, 0.18),
   glasses: true, mustache: true, part: true,

@@ -7,7 +7,9 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <title>포장마차 타이쿤</title>
     <link rel="icon" href="icon.svg" />
-    <link rel="preload" as="image" href="assets/art/title/main.webp" />
+    <link rel="preload" as="image" href="assets/art/title/loading_1.webp" />
+    <link rel="preload" as="image" href="assets/art/title/loading_2.webp" />
+    <link rel="preload" as="image" href="assets/art/title/menu.webp" />
     <style>
       html,
       body {
@@ -33,15 +35,22 @@
         top: 0;
         touch-action: none;
       }
-      /* 로딩 화면: 게임과 같은 16:9 틀 안에 시작 화면과 같은 그림 (어둡게 덮지 않음) + 아래 가운데 게임 이름과 진행 막대 (크기는 틀 높이 --h 기준) */
+      /*
+       * 로딩 화면 (2026-11-17 사용자 그림 두 장 "번갈아 가면서 컷 애니메이션처럼 라면이 끓고 있는 것처럼"):
+       * 가스불 위 라면 냄비 그림 두 장(assets/art/title/loading_1·2.webp, 원본 web/art_src/loading_ramen_1·2.png 를
+       * tools/loading_art.mjs 가 막대 안 채움을 지운 것)을 겹쳐 두고 뒷장을 0.3초마다 껐다 켜서 보글보글 끓는 것처럼.
+       * 그림 속 "Loading..." 막대 홈(.ld-track, 자리 = 그림 기준 %) 안에 진행(--p, main.ts 가 0~1)만큼 크림색 채움,
+       * 막대 아래엔 돌아가며 나오는 팁. 크기는 16:9 틀 높이 --h 기준.
+       */
       #loading {
         position: fixed;
         inset: 0;
         z-index: 50;
         background: #0d0f1a;
         transition: opacity 0.5s ease;
-        font-family: "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Noto Sans KR", "Noto Sans CJK KR", sans-serif;
+        font-family: var(--lang-fonts, "Jua"), "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
         --h: min(100vh, 56.25vw);
+        --p: 0;
       }
       #loading.hide {
         opacity: 0;
@@ -55,65 +64,52 @@
         height: var(--h);
         transform: translate(-50%, -50%);
         overflow: hidden;
-        background: #120c0a url("assets/art/title/main.webp") center top / cover no-repeat;
+        background: #3a2a22;
       }
-      /* 게임 이름은 시작 화면(ui/title.ts)과 같은 크기·자리 (설계 1080 기준 124px, 위 끝 y≈647) — 넘어갈 때 글자가 튀지 않게 */
-      #loading .ld-box {
-        position: absolute;
-        left: 50%;
-        bottom: calc(var(--h) * 0.154);
-        transform: translateX(-50%);
-        width: calc(var(--h) * 1.1);
-        text-align: center;
-      }
-      #loading .ld-title {
-        position: relative;
-        font-family: "Bagel Fat One", "Jua", "Malgun Gothic", sans-serif;
-        font-size: calc(var(--h) * 0.1185);
-        line-height: 1.15;
-        white-space: nowrap;
-        filter: drop-shadow(0 calc(var(--h) * 0.0093) calc(var(--h) * 0.013) rgba(0, 0, 0, 0.55));
-      }
-      #loading .ld-back {
-        color: #6a1a0c;
-        -webkit-text-stroke: calc(var(--h) * 0.0244) #3a0c05;
-        paint-order: stroke fill;
-        text-shadow: 0 calc(var(--h) * 0.011) 0 #3a0c05;
-      }
-      #loading .ld-front {
+      #loading .ld-img {
         position: absolute;
         inset: 0;
-        color: transparent;
-        background: linear-gradient(180deg, #fffdf0 0%, #fff0a8 38%, #ffc53d 72%, #ff9a2a 100%);
-        -webkit-background-clip: text;
-        background-clip: text;
+        background: center / 100% 100% no-repeat;
       }
-      #loading .ld-bar {
-        margin: calc(var(--h) * 0.03) auto 0;
-        width: calc(var(--h) * 0.56);
-        height: calc(var(--h) * 0.034);
-        box-sizing: border-box;
-        border-radius: 999px;
-        padding: calc(var(--h) * 0.004);
-        background: #1a0e07;
-        border: calc(var(--h) * 0.0037) solid #3a0c05;
-        box-shadow: 0 calc(var(--h) * 0.005) 0 rgba(0, 0, 0, 0.5), inset 0 calc(var(--h) * 0.003) 0 rgba(0, 0, 0, 0.6);
+      #loading .ld-img.a { background-image: url("assets/art/title/loading_1.webp"); }
+      #loading .ld-img.b { background-image: url("assets/art/title/loading_2.webp"); animation: ld-flip 0.6s steps(1, end) infinite; }
+      @keyframes ld-flip {
+        0% { opacity: 0; }
+        50% { opacity: 1; }
+      }
+      /* 그림 속 막대 홈 (원본 1672×941 에서 x 1042~1588, y 769~798) */
+      #loading .ld-track {
+        position: absolute;
+        left: 62.321%;
+        top: 81.722%;
+        width: 32.656%;
+        height: 3.188%;
+        border-radius: calc(var(--h) * 0.004);
         overflow: hidden;
       }
       #loading .ld-fill {
-        width: 0;
         height: 100%;
-        border-radius: 999px;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.1) 45%, rgba(0, 0, 0, 0.12) 100%), #ffc531;
+        width: calc(var(--p) * 100%);
+        border-radius: calc(var(--h) * 0.004);
+        background: linear-gradient(180deg, #fff1d6 0%, #f9daad 45%, #edc893 100%);
+        transition: width 0.12s linear;
       }
-      #loading .ld-text {
-        margin-top: calc(var(--h) * 0.016);
-        font-family: "Jua", "Malgun Gothic", sans-serif;
-        font-size: calc(var(--h) * 0.032);
-        color: #fff4dc;
-        -webkit-text-stroke: calc(var(--h) * 0.008) #2a1208;
+      #loading.done .ld-fill { filter: brightness(1.08); }
+      #loading .ld-tip {
+        position: absolute;
+        left: 61.5%;
+        top: 86.6%;
+        width: 34.3%;
+        text-align: center;
+        font-size: calc(var(--h) * 0.022);
+        line-height: 1.3;
+        color: #f8e6c6;
+        -webkit-text-stroke: calc(var(--h) * 0.005) #23130d;
         paint-order: stroke fill;
-        letter-spacing: 0.06em;
+        transition: opacity 0.3s;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #loading .ld-img.b { animation: none; opacity: 0; }
       }
     </style>
   </head>
@@ -121,11 +117,10 @@
     <div id="app"></div>
     <div id="loading">
       <div class="ld-frame">
-        <div class="ld-box">
-          <div class="ld-title"><div class="ld-back">포장마차 타이쿤</div><div class="ld-front">포장마차 타이쿤</div></div>
-          <div class="ld-bar"><div class="ld-fill"></div></div>
-          <div class="ld-text">가게 문 여는 중…</div>
-        </div>
+        <div class="ld-img a"></div>
+        <div class="ld-img b"></div>
+        <div class="ld-track"><div class="ld-fill"></div></div>
+        <div class="ld-tip">팁: 막대가 초록색 '완벽' 구간일 때 꺼내면 손님이 좋아해요</div>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

@@ -4,6 +4,7 @@
 // 가게마다 V 자로 꺾인 길 안쪽에 건물, 스테이지 7개는 길바닥에 박힌 발판, 건물 입구 앞마당에 ∞(무한 영업). 끝에는 "새 가게 준비 중" 빈터.
 // 가게의 마지막 스테이지를 깨면 그 가게 무한 영업이 열리고, 다음 가게는 모은 돈으로 산다 (잠긴 건물에 "가게 열기 · 값").
 // 위쪽(고정): 타이틀로 / 지금 보고 있는 가게 이름 / 별·지갑.
+// 2026-11-18 사용자 예시 그림 (art_src/ref_map_ui.png): 위 버튼·간판·지갑 판은 그 그림에서 오린 조각 (ui/map_*.webp) 위에 글자.
 
 import { R, V, clamp, rgb, v } from "../engine/geom.ts";
 import { Scene, type PointerInfo } from "../engine/game.ts";
@@ -12,6 +13,7 @@ import { Sound } from "../engine/audio.ts";
 import * as Ui from "../engine/ui.ts";
 import * as D from "../core/defs.ts";
 import type { ShopDef } from "../core/defs.ts";
+import { comicFor } from "./comic.ts";
 import { GameState } from "../state/game_state.ts";
 import { MapArt } from "../art/map_art.ts";
 import * as G from "../art/map_geo.ts";
@@ -33,11 +35,9 @@ function moneyRow(name: string, won: number, color = Ui.INK): HTMLDivElement {
 }
 
 export { ZONE_W, LOT_W, zoneX, worldWidth, levelPos } from "../art/map_geo.ts";
-const ZONE_W = G.ZONE_W;
-const PLATE_SIZE = v(420, 52);
+const PLATE_SIZE = v(430, 64);
 const PLATE_MIN_Y = 128.0; // 이름표가 위쪽 제목 상자에 닿지 않게
-const UPGRADE_SIZE = v(240, 62);
-const SUPPLY_SIZE = v(200, 62); // 장보기 버튼
+const UPGRADE_SIZE = v(240, 70);
 const LEVEL_R = 60.0;
 const ENDLESS_R = 46.0;
 const EVENT_R = 54.0; // 미식가 이벤트 발판
@@ -45,6 +45,56 @@ const DRAG_START = 14.0; // 이만큼 움직여야 밀기로 본다 (그 전엔 
 const FRICTION = 4.0; // 놓은 뒤 미끄러지다 멈추는 빠르기
 const SCROLL_TIME = 0.45;
 const MAX_FLING = 6000.0; // 놓았을 때 미끄러지는 속도 상한 (설계 px/초)
+
+/** 지도 위 HTML 조각 (예시 그림에서 오린 판·버튼, tools/map_ui_art.mjs) */
+export const MAP_CSS = `
+.map-plank { pointer-events: auto; box-sizing: border-box; border: 0; padding: 0 18px 7px; cursor: pointer; font-family: inherit;
+  background: center / 100% 100% no-repeat; display: flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap;
+  color: #3b2415; font-size: 29px; -webkit-text-stroke: 6px #fff4e0; paint-order: stroke fill; transition: transform 0.08s, filter 0.12s;
+  filter: drop-shadow(0 5px 6px rgba(0,0,0,0.35)); }
+.map-plank:hover { filter: drop-shadow(0 5px 6px rgba(0,0,0,0.35)) brightness(1.06); }
+.map-plank:active { transform: translateY(3px); }
+.map-plank .ic { width: 38px; height: 38px; flex: none; }
+.map-dot { position: absolute; right: -6px; top: -8px; width: 38px; height: 38px; border-radius: 50%; background: #e0412c; border: 4px solid #3b2415;
+  color: #fff; font-size: 26px; line-height: 30px; text-align: center; -webkit-text-stroke: 0; pointer-events: none; }
+.map-board { box-sizing: border-box; background: center / 100% 100% no-repeat; filter: drop-shadow(0 6px 8px rgba(0,0,0,0.4)); }
+`;
+
+function mapUiUrl(name: string): string {
+  return `url(assets/art/ui/map_${name}.webp)`;
+}
+
+/** 크림색 나무 알약 버튼 (예시 그림 조각 + 글자) */
+function plankButton(piece: string, text: string, icon: string | null): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.className = "map-plank";
+  b.style.backgroundImage = mapUiUrl(piece);
+  if (icon !== null) b.appendChild(Ui.icon(icon, 38));
+  const t = document.createElement("span");
+  t.textContent = text;
+  b.appendChild(t);
+  return b;
+}
+
+/** 소리 켜기/끄기 (동그란 나무 버튼) */
+function plankSound(): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.className = "map-plank";
+  b.style.backgroundImage = mapUiUrl("btn_round");
+  b.style.padding = "0 0 6px";
+  const paint = () => {
+    b.replaceChildren(Ui.icon(Sound.muted ? Ui.ICON.soundOff : Ui.ICON.soundOn, 44));
+    b.title = Sound.muted ? "소리 켜기" : "소리 끄기";
+  };
+  paint();
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    Sound.setMuted(!Sound.muted);
+    paint();
+    Sound.playSfx("click");
+  });
+  return b;
+}
 
 export function buyText(sid: string): string {
   return `가게 열기 · ${D.formatWon(D.shopOpenCost(sid))}`;
@@ -71,7 +121,7 @@ export class StageMap extends Scene {
   private scrollTween: Tween | null = null;
   private centerShopIdx = -1;
   private upgradeBtns: Record<string, MapButton> = {};
-  private supplyBtns: Record<string, MapButton> = {};
+  private supplyBtn!: HTMLButtonElement; // 위쪽 "장보기" (모든 가게 재료를 한 곳에서, 2026-11-20)
   private popupGo: HTMLElement | null = null; // 스테이지 창의 "영업 시작" (튜토리얼이 가리킴)
   private tut: Tutorial | null = null;
 
@@ -113,14 +163,14 @@ export class StageMap extends Scene {
     const steps: TutStep[] = [];
     if (step === "start") {
       steps.push({
-        text: `어서 와요, 새 사장님! 오늘부터 이 골목 포장마차를 맡게 됐어요. 개업 자금 ${D.formatWon(D.START_MONEY)}으로 시작해요. 이모가 하나씩 알려 줄게요!`,
+        text: "어서 와요, 새 사장님! 오늘부터 이 골목 포장마차를 맡게 됐어요. 가진 돈은 아직 없지만 걱정 마요, 첫 재료는 이모가 공짜로 줄게요. 하나씩 알려 줄게요!",
         next: "좋아요!",
       });
     }
     if (step === "start" || step === "buy") {
       steps.push({
         text: "음식을 만들려면 먼저 재료가 있어야 해요. '장보기'를 눌러 재료를 사러 가요!",
-        target: () => this.mapButtonRect(this.supplyBtns[sid]),
+        target: () => elementRect(this.supplyBtn, this),
         wait: "supply",
         done: () => GameState.setTutorial("buy"),
       });
@@ -171,7 +221,7 @@ export class StageMap extends Scene {
 
   /** 화면 가운데에 있는 가게 순번 */
   centerShop(): number {
-    return clamp(Math.floor((this.scroll + this.vw * 0.5) / ZONE_W), 0, D.SHOPS.length - 1);
+    return clamp(G.zoneAt(this.scroll + this.vw * 0.5), 0, D.SHOPS.length - 1);
   }
 
   shopId(): string {
@@ -207,15 +257,14 @@ export class StageMap extends Scene {
       const opened = GameState.shopOpened(sh.id);
       // 이름표 (+ 열린 가게는 오른쪽에 업그레이드) 는 건물 위에
       const b = z.bounds;
-      // 이름표 오른쪽에 업그레이드 + 장보기 (지도 왼쪽 끝 밖으로 나가지 않게)
-      const rowW = PLATE_SIZE.x + (opened ? 14.0 + UPGRADE_SIZE.x + 12.0 + SUPPLY_SIZE.x : 0.0);
+      // 이름표 오른쪽에 업그레이드 (지도 왼쪽 끝 밖으로 나가지 않게). 장보기는 2026-11-20부터 위쪽 막대에 하나만
+      const rowW = PLATE_SIZE.x + (opened ? 14.0 + UPGRADE_SIZE.x : 0.0);
       const y = Math.max(PLATE_MIN_Y, b.y - PLATE_SIZE.y - 18.0);
       const x = Math.max(16.0, b.center().x - rowW * 0.5);
       this.addPlate(sh, v(x, y), opened);
       if (opened) {
         const by = y - (UPGRADE_SIZE.y - PLATE_SIZE.y) * 0.5;
         this.addUpgradeButton(sh.id, v(x + PLATE_SIZE.x + 14.0, by));
-        this.addSupplyButton(sh.id, v(x + PLATE_SIZE.x + 14.0 + UPGRADE_SIZE.x + 12.0, by));
       } else this.addLockedNote(sh, b);
     }
     art.walkedS = GameState.storyCleared || GameState.levelCleared(D.TOTAL_LEVELS) ? L.endS : G.levelS(clamp(GameState.level, 1, D.TOTAL_LEVELS));
@@ -305,27 +354,27 @@ export class StageMap extends Scene {
     this.upgradeBtns[sid] = b;
   }
 
-  /** 장보기 (재료가 떨어진 메뉴가 있으면 "!") */
-  private addSupplyButton(sid: string, pos: V): void {
-    const b = new MapButton();
-    b.text = "장보기";
-    b.icon = "basket";
-    b.color = Ui.ACCENT;
-    b.fontSize = 28;
-    b.size = SUPPLY_SIZE;
-    b.position = pos;
-    const lv = Math.min(Math.max(GameState.level, D.shopDef(sid).first_level), D.shopDef(sid).last_level);
-    b.badge = Object.keys(GameState.stockShortage(lv)).length > 0;
-    b.onPressed = () => this.goSupply(sid);
-    this.addButton(b);
-    this.supplyBtns[sid] = b;
-  }
-
-  private goSupply(sid: string): void {
+  /** 장보기 = 재료 가게 하나 (2026-11-20 사용자 "가게마다 장보기가 있는 게 아니라, 모든 가게 재료를 거기서 다 살 수 있게").
+   * 처음 펼치는 칸 = 지금 지도에서 보고 있는 가게 (열린 가게만, SupplyScene 왼쪽 가게 탭으로 바꿈) */
+  private goSupply(): void {
     if (this.busy()) return;
     this.tut?.onEvent("supply");
-    GameState.mapShop = sid;
+    this.settle();
     this.game.goto("supply");
+  }
+
+  /** 테스트·튜토리얼용: 위쪽 장보기 버튼 */
+  supplyButton(): HTMLElement {
+    return this.supplyBtn;
+  }
+
+  /** 열린 가게 중 다음 스테이지 재료가 모자란 가게가 있는지 (장보기 버튼 "!") */
+  private anyShortage(): boolean {
+    return D.SHOPS.some((sh) => {
+      if (!GameState.shopOpened(sh.id)) return false;
+      const lv = Math.min(Math.max(GameState.level, sh.first_level), sh.last_level);
+      return Object.keys(GameState.stockShortage(lv)).length > 0; // stockShortage 는 그 스테이지의 가게 재료로 셈
+    });
   }
 
   /** 아직 안 연 가게: 앞 가게를 다 깼으면 "가게 열기 · 값" 버튼 (돈이 모자라면 흐리게 + 얼마 더 필요한지), 아니면 언제 살 수 있는지 */
@@ -411,7 +460,7 @@ export class StageMap extends Scene {
   /** 가게 구역이 화면 가운데 오게 */
   scrollToShop(i: number, animate = true): void {
     const idx = clamp(i, 0, D.SHOPS.length - 1);
-    this.scrollTo(G.zoneX(idx) + ZONE_W * 0.5 - this.vw * 0.5, animate);
+    this.scrollTo(G.zoneCenterX(idx) - this.vw * 0.5, animate);
   }
 
   /** 그 가게에서 지금 도전할 스테이지(없으면 가게 가운데)가 화면 가운데 오게 */
@@ -542,42 +591,52 @@ export class StageMap extends Scene {
 
   private buildHud(): void {
     const vs = v(this.vw, this.vh);
-    const back = Ui.button("", Ui.SECONDARY, 30, 84);
-    Ui.withIcon(back, Ui.ICON.back, "타이틀");
-    back.style.padding = "0 22px 4px 16px";
-    Ui.place(back, 20, 16, 200, 72);
+    // 왼쪽 위: 타이틀 (꺾쇠는 그림에 있음) · 단골 도감 (2026-11-16 사용자: 시작 화면이 아니라 게임 안에서 보게) · 소리
+    const back = plankButton("btn_title", "타이틀", null);
+    back.style.paddingLeft = "56px";
+    Ui.place(back, 16, 12, 196, 82);
     Ui.onPress(back, () => this.goTitle());
     this.ui.appendChild(back);
-
-    // 타이틀 옆: 단골 도감 · 기록 (2026-11-16 사용자: 시작 화면이 아니라 게임 안에서 보게)
-    const book = Ui.button("", Ui.SECONDARY, 30, 84);
-    Ui.withIcon(book, Ui.ICON.book, "단골 도감");
-    book.style.padding = "0 22px 4px 16px";
-    Ui.place(book, 234, 16, 250, 72);
+    const book = plankButton("btn_book", "단골 도감", Ui.ICON.book);
+    Ui.place(book, 222, 12, 246, 82);
     Ui.onPress(book, () => this.openBook());
     this.ui.appendChild(book);
-    const snd = Ui.soundToggle(72);
-    Ui.place(snd, 500, 16, 72, 72);
+    const sup = plankButton("btn_book", "장보기", Ui.ICON.basket);
+    Ui.place(sup, 476, 12, 196, 82);
+    sup.style.position = "absolute";
+    Ui.onPress(sup, () => this.goSupply());
+    if (this.anyShortage()) {
+      const dot = Ui.div("map-dot");
+      dot.textContent = "!";
+      sup.appendChild(dot);
+    }
+    this.ui.appendChild(sup);
+    this.supplyBtn = sup;
+    const snd = plankSound();
+    Ui.place(snd, vs.x - 16.0 - 480.0 - 92.0, 12, 82, 82);
     this.ui.appendChild(snd);
 
     // 가운데: 가게 간판 (나무 판 + 가게 이름 큰 글자 + 스테이지 범위)
-    const bar = Ui.chip(30);
-    Ui.place(bar, vs.x * 0.5 - 330.0, 12, 660, 104);
+    const bar = Ui.div("map-board");
+    bar.style.backgroundImage = mapUiUrl("title");
+    // 왼쪽 버튼 셋(타이틀·도감·장보기)과 오른쪽 소리·지갑 사이 가운데 (2026-11-20 장보기 버튼이 들어오며 660 → 560)
+    Ui.place(bar, 690, 8, 560, 108);
     this.ui.appendChild(bar);
-    this.titleEl = Ui.place(Ui.heading("", 40, Ui.CREAM, rgb(0.1, 0.05, 0.02)), 0, 6, 652, 58);
+    this.titleEl = Ui.place(Ui.heading("", 40, Ui.CREAM, rgb(0.1, 0.05, 0.02)), 0, 10, 560, 58);
     this.titleEl.style.lineHeight = "58px";
     bar.appendChild(this.titleEl);
-    this.subtitleEl = Ui.place(Ui.label("", 25, rgb(1.0, 0.8, 0.45)), 0, 60, 652, 32);
-    this.subtitleEl.style.lineHeight = "32px";
+    this.subtitleEl = Ui.place(Ui.heading("", 26, rgb(1.0, 0.82, 0.42), rgb(0.1, 0.05, 0.02)), 0, 64, 560, 34);
+    this.subtitleEl.style.lineHeight = "34px";
     bar.appendChild(this.subtitleEl);
 
     // 오른쪽: 모은 별 · 지갑
-    const info = Ui.chip(999);
+    const info = Ui.div("map-board");
+    info.style.backgroundImage = mapUiUrl("wallet");
     info.classList.add("hbox");
     info.style.alignItems = "center";
     info.style.gap = "10px";
-    info.style.padding = "0 26px 0 14px";
-    Ui.place(info, vs.x - 20.0 - 470.0, 16, 470, 76);
+    info.style.padding = "0 34px 5px 24px";
+    Ui.place(info, vs.x - 16.0 - 480.0, 12, 480, 84);
     this.ui.appendChild(info);
     info.appendChild(Ui.icon(Ui.ICON.star, 46));
     const stars = Ui.heading(String(GameState.totalStars()), 34, Ui.GOLD, rgb(0.1, 0.05, 0.02), "left");
@@ -826,14 +885,14 @@ export class StageMap extends Scene {
     if (e === null) return;
     const shop = D.shopDef(sid);
     const col = this.panelPopup("미식가 방문", Ui.EVENT);
-    const face = gourmetPortrait(150, GameState.eventPlayed(sid) || GameState.eventOpen(sid));
+    const face = gourmetPortrait(sid, 150, GameState.eventPlayed(sid) || GameState.eventOpen(sid));
     face.el.style.alignSelf = "center";
     col.appendChild(face.el);
     if (GameState.eventPlayed(sid)) {
       const grade = GameState.eventGrade(sid);
       col.appendChild(starRow(grade, 420, 80, 36).el);
-      col.appendChild(Ui.label(`"${D.GOURMET_REVIEWS[grade]}"`, 30, Ui.INK, "center", true));
-      col.appendChild(Ui.label(`${shop.name}에 이미 다녀갔어요 · 보상 ${D.formatWon(D.eventReward(e, grade))}`, 27, Ui.MUTED, "center", true));
+      col.appendChild(Ui.label(`"${D.gourmetReview(e.critic, grade)}"`, 30, Ui.INK, "center", true));
+      col.appendChild(Ui.label(grade <= D.BAD_GRADE ? `${shop.name}에 이미 다녀갔어요 · 혹평을 받았어요` : `${shop.name}에 이미 다녀갔어요 · 유명세 매출 +${D.formatWon(D.eventReward(e, grade))}`, 27, Ui.MUTED, "center", true));
       const ok = Ui.button("확인", Ui.SECONDARY, 38, 110);
       Ui.onPress(ok, () => this.closePopup());
       col.appendChild(ok);
@@ -842,19 +901,20 @@ export class StageMap extends Scene {
     if (!GameState.eventOpen(sid)) {
       const ln = D.levelName(shop.last_level);
       col.appendChild(Ui.label(`${ln}${D.josa(ln, "을", "를")} 깨면 까다로운 미식가가\n${shop.name}에 찾아와요.`, 32, Ui.INK, "center", true));
-      col.appendChild(Ui.label(`별 5개면 보상 ${D.formatWon(e.reward)} · 딱 한 번만 도전할 수 있어요`, 27, Ui.MUTED, "center", true));
+      col.appendChild(Ui.label("좋은 평가를 받으면 가게가 유명해져요 · 딱 한 번만 도전할 수 있어요", 27, Ui.MUTED, "center", true));
       const ok = Ui.button("확인", Ui.SECONDARY, 38, 110);
       Ui.onPress(ok, () => this.closePopup());
       col.appendChild(ok);
       return;
     }
-    col.appendChild(Ui.label(`${D.CUSTOMERS.gourmet.name}이 ${shop.name}에 찾아왔어요!`, 32, Ui.INK, "center", true));
+    const cn = D.criticName(e.critic);
+    col.appendChild(Ui.label(`${cn}${D.josa(cn, "이", "가")} ${shop.name}에 찾아왔어요!`, 32, Ui.INK, "center", true));
     const box = Ui.inset(16);
     box.classList.add("vbox");
     box.style.gap = "6px";
     box.appendChild(Ui.row("주문", `${e.perRound}가지씩 코스 ${e.rounds}번`, 30));
     box.appendChild(Ui.row("평가", "완벽한 요리만 높은 점수", 30));
-    box.appendChild(Ui.row("보상", `별 5개면 ${D.formatWon(e.reward)}`, 30, Ui.INK, Ui.EVENT));
+    box.appendChild(Ui.row("유명세", `신문에 실리면 매출 최대 +${D.formatWon(e.reward)}`, 30, Ui.INK, Ui.EVENT));
     col.appendChild(box);
     col.appendChild(Ui.tag("딱 한 번만 도전할 수 있어요!", Ui.BAD, 28));
     const row = Ui.hbox(20);
@@ -869,7 +929,8 @@ export class StageMap extends Scene {
     go.style.flex = "1 1 auto";
     Ui.onPress(go, () => {
       GameState.chooseEvent(sid);
-      this.game.goto("shift");
+      // 만화가 있는 미식가 스테이지는 영업 전에 만화부터 (ui/comic.ts, 2026-11-20)
+      this.game.goto(comicFor(sid) ? "comic" : "shift");
     });
     row.appendChild(go);
   }

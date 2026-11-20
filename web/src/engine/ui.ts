@@ -278,6 +278,8 @@ export const ICON = {
   book: `<svg viewBox="0 0 48 48"><path d="M8 9h13a5 5 0 0 1 5 5v27a4 4 0 0 0-4-4H8z" fill="#fff6e4" stroke="#3b2415" stroke-width="4" stroke-linejoin="round"/><path d="M40 9H27a5 5 0 0 0-5 5v27a4 4 0 0 1 4-4h14z" fill="#ffe0a8" stroke="#3b2415" stroke-width="4" stroke-linejoin="round"/></svg>`,
   up: `<svg viewBox="0 0 48 48"><path d="M24 6L7 24h10v17h14V24h10z" fill="#fff" stroke="#3b2415" stroke-width="4.5" stroke-linejoin="round"/></svg>`,
   exit: `<svg viewBox="0 0 48 48"><path d="M8 6h20v36H8z" fill="#ffe0a8" stroke="#3b2415" stroke-width="4" stroke-linejoin="round"/><circle cx="22" cy="25" r="2.6" fill="#3b2415"/><path d="M28 24h14M36 17l7 7-7 7" fill="none" stroke="#3b2415" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/><path d="M28 24h14M36 17l7 7-7 7" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  tag: `<svg viewBox="0 0 48 48"><path d="M6 10a4 4 0 0 1 4-4h14l18 18a4 4 0 0 1 0 5.6L29.6 42a4 4 0 0 1-5.6 0L6 24z" fill="#ffcf3a" stroke="#3b2415" stroke-width="3.5" stroke-linejoin="round"/><circle cx="15" cy="15" r="3.6" fill="#fff6dc" stroke="#3b2415" stroke-width="3"/><path d="M22 27l8-8M24 33l10-10" stroke="#c07a12" stroke-width="3.2" stroke-linecap="round"/></svg>`,
+  basket: `<svg viewBox="0 0 48 48"><path d="M14 20 Q24 4 34 20" fill="none" stroke="#3b2415" stroke-width="7" stroke-linecap="round"/><path d="M14 20 Q24 4 34 20" fill="none" stroke="#e0a865" stroke-width="3" stroke-linecap="round"/><path d="M5 20h38l-5 22H10z" fill="#d98f45" stroke="#3b2415" stroke-width="4" stroke-linejoin="round"/><path d="M9 29h30M17 21l-1 20M24 21v20M31 21l1 20" stroke="#8d5a26" stroke-width="2.5"/><rect x="3" y="17" width="42" height="7" rx="3.5" fill="#f2b866" stroke="#3b2415" stroke-width="3.5"/></svg>`,
   ad: `<svg viewBox="0 0 48 48"><rect x="5" y="10" width="38" height="28" rx="7" fill="#fff" stroke="#123a6a" stroke-width="4"/><path d="M20 17l11 7-11 7z" fill="#3d8be0"/></svg>`,
 };
 
@@ -463,7 +465,7 @@ export const UI_CSS = `
 .shop-sign.open { cursor: default; animation: none; }
 .shop-sign.open .shop-sign-board { background: repeating-linear-gradient(180deg, #4c9a3a 0 24px, #43892f 24px 26px), #4c9a3a; }
 .shop-sign.open .shop-sign-sub { animation: none; }
-.shop-sign.corner { left: 14px !important; top: 104px; scale: 0.42; transform-origin: 0 0; pointer-events: none; }
+.shop-sign.corner { left: 14px !important; top: 82px; scale: 0.42; transform-origin: 0 0; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .shop-sign, .shop-sign-sub { animation: none; } .shop-sign, .shop-sign-board { transition: none; } }
 .inset { box-sizing: border-box; background: rgba(120,70,30,0.09); border: 3px solid rgba(80,45,20,0.18); border-radius: 22px; }
 

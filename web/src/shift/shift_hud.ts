@@ -12,12 +12,19 @@ import * as Ui from "../engine/ui.ts";
 import { Sound } from "../engine/audio.ts";
 import * as FoodArt from "../art/food_art.ts";
 import * as DishArt from "../art/dish_art.ts";
+import * as ArtAssets from "../art/art_assets.ts";
 import { TARP_CREAM, TARP_RED } from "../art/street_art.ts";
 
-/** 새 메뉴 안내에 붙는 메뉴 그림 (그 메뉴 그릇에 담긴 모습) */
+/** 새 메뉴 안내·장보기·가격표에 붙는 메뉴 그림 (사용자 메뉴 그림이 있으면 그것, 없으면 그 메뉴 그릇에 담긴 모습) */
 export function menuPic(menu: string, w: number, h: number): CanvasWidget {
   return new CanvasWidget(w, h, (g, t) => {
     FoodArt.setClock(t);
+    const icon = ArtAssets.menuIcon(menu);
+    if (icon !== null) {
+      const k = Math.min((w * 0.9) / icon.width, (h * 0.92) / icon.height);
+      g.texture(icon, new R(w * 0.5 - icon.width * k * 0.5, h * 0.5 - icon.height * k * 0.5, icon.width * k, icon.height * k));
+      return;
+    }
     DishArt.draw(g, menu, v(w * 0.5, h * 0.58), Math.min(w / 190.0, h / 135.0), D.Q.PERFECT);
   });
 }
@@ -53,6 +60,7 @@ export class ShiftHud extends Node2D {
   readonly signPressed = new Signal(); // "준비 중" 팻말을 누름 → 가게 문 열기
   readonly backPressed = new Signal(); // 시작 안내의 "나중에" (미식가 이벤트: 기회를 쓰지 않고 지도로)
   readonly pausePressed = new Signal();
+  readonly pricePressed = new Signal(); // 위 "가격표" 버튼 → 영업 중 가격 바꾸기
   readonly resumePressed = new Signal();
   readonly quitPressed = new Signal();
 
@@ -70,6 +78,7 @@ export class ShiftHud extends Node2D {
   private toastTween: Tween | null = null;
   private intro: HTMLDivElement | null = null;
   private pause: HTMLDivElement | null = null;
+  private priceBtn!: HTMLElement;
   private shutter!: CanvasWidget;
   private shutterState = { drop: 0 };
   private shutterCaption = "";
@@ -87,7 +96,7 @@ export class ShiftHud extends Node2D {
     this.buildTopBar(viewW);
     this.toastEl = Ui.heading("", 36, WHITE, rgb(0.12, 0.06, 0.03));
     this.toastEl.classList.remove("disp");
-    Ui.place(this.toastEl, 0, 114, viewW, 54);
+    Ui.place(this.toastEl, 0, 80, viewW, 50);
     this.toastEl.style.opacity = "0";
     this.root.appendChild(this.toastEl);
     this.shutter = new CanvasWidget(viewW, viewH, (g) => this.drawShutter(g, viewW, viewH));
@@ -172,38 +181,68 @@ export class ShiftHud extends Node2D {
   private buildTopBar(w: number): void {
     const dark = rgb(0.1, 0.05, 0.02);
     // 왼쪽: 무한 영업의 버틴 시간 (스토리는 남은 손님 수를 일부러 안 보여 주므로 상자를 숨긴다)
-    this.leftBox = this.box(18, 10, 320, 86);
-    this.icon(this.leftBox, Ui.ICON.clock, 10, 12, 56);
-    this.timeTitle = this.placeLabel(this.leftBox, Ui.label("버틴 시간", 21, Ui.CREAM.withA(0.75), "left"), 78, 4, 230, 28);
-    this.timeLabel = this.placeLabel(this.leftBox, Ui.heading("", 38, Ui.CREAM, dark, "left"), 78, 26, 230, 52);
+    // (2026-11-17 손님을 위로 올리며 칸을 줄임: 높이 86 → 64, 글자 0.8배)
+    this.leftBox = this.box(14, 6, 250, 64);
+    this.icon(this.leftBox, Ui.ICON.clock, 8, 10, 44);
+    this.timeTitle = this.placeLabel(this.leftBox, Ui.label("버틴 시간", 17, Ui.CREAM.withA(0.75), "left"), 60, 3, 182, 22);
+    this.timeLabel = this.placeLabel(this.leftBox, Ui.heading("", 30, Ui.CREAM, dark, "left"), 60, 20, 182, 40);
 
     // 가운데: 오늘 매출 + 할당량 게이지
-    const mid = this.box(w * 0.5 - 270.0, 10, 540, 86);
-    this.icon(mid, Ui.ICON.coin, 8, 10, 62);
-    this.moneyTitle = this.placeLabel(mid, Ui.label("오늘 매출", 21, Ui.CREAM.withA(0.75), "left"), 82, 4, 440, 28);
-    this.moneyLabel = this.placeLabel(mid, Ui.heading("0원", 38, Ui.GOLD, dark, "left"), 82, 26, 240, 52);
-    this.goal = Ui.gauge(206, 24);
-    Ui.place(this.goal.el, 314, 44, 206, 24);
+    const mid = this.box(w * 0.5 - 215.0, 6, 430, 64);
+    this.icon(mid, Ui.ICON.coin, 6, 8, 48);
+    this.moneyTitle = this.placeLabel(mid, Ui.label("오늘 매출", 17, Ui.CREAM.withA(0.75), "left"), 62, 3, 356, 22);
+    this.moneyLabel = this.placeLabel(mid, Ui.heading("0원", 30, Ui.GOLD, dark, "left"), 62, 20, 190, 40);
+    this.goal = Ui.gauge(166, 20);
+    Ui.place(this.goal.el, 252, 33, 166, 20);
     mid.appendChild(this.goal.el);
 
     // 오른쪽: 가게·레벨 + 일시정지
-    const right = this.box(w - 18.0 - 86.0 - 14.0 - 300.0, 10, 300, 86);
-    this.subLabel = this.placeLabel(right, Ui.label("", 21, Ui.CREAM.withA(0.75)), 8, 4, 276, 28);
-    this.dayLabel = this.placeLabel(right, Ui.heading("", 34, Ui.CREAM, dark), 8, 28, 276, 48);
+    const right = this.box(w - 14.0 - 66.0 - 10.0 - 240.0, 6, 240, 64);
+    this.subLabel = this.placeLabel(right, Ui.label("", 17, Ui.CREAM.withA(0.75)), 6, 3, 228, 22);
+    this.dayLabel = this.placeLabel(right, Ui.heading("", 27, Ui.CREAM, dark), 6, 22, 228, 38);
 
-    const pause = Ui.button("", Ui.SECONDARY, 30, 86);
-    Ui.withIcon(pause, Ui.ICON.pause, "", 44);
+    const pause = Ui.button("", Ui.SECONDARY, 24, 66);
+    Ui.withIcon(pause, Ui.ICON.pause, "", 34);
     pause.setAttribute("aria-label", "일시정지");
     pause.title = "일시정지";
     pause.style.padding = "0";
-    pause.style.borderRadius = "24px";
-    Ui.place(pause, w - 18.0 - 86.0, 8, 86, 80);
+    pause.style.borderRadius = "20px";
+    Ui.place(pause, w - 14.0 - 66.0, 5, 66, 62);
     Ui.onPress(pause, () => this.pausePressed.emit());
     this.root.appendChild(pause);
+
+    // 가격표 (2026-11-17 사용자 "장보기 말고 영업 중인 가게에서 가격 조정"): 영업 시작 뒤에 보임 (튜토리얼·미식가 이벤트엔 숨김)
+    const price = Ui.button("", Ui.SECONDARY, 24, 62);
+    Ui.withIcon(price, Ui.ICON.tag, "가격표", 34);
+    price.style.padding = "0 14px";
+    price.style.borderRadius = "20px";
+    Ui.place(price, w - 14.0 - 66.0 - 10.0 - 240.0 - 10.0 - 168.0, 5, 168, 62);
+    Ui.onPress(price, () => this.pricePressed.emit());
+    price.style.display = "none";
+    this.root.appendChild(price);
+    this.priceBtn = price;
+  }
+
+  setPriceVisible(on: boolean): void {
+    this.priceBtn.style.display = on ? "" : "none";
+  }
+
+  private ratingFlash = 0;
+  private ratingDir = 0;
+
+  /** 평점이 오르거나(1) 내리면(-1) 잠깐 색으로 알림 */
+  flashRating(dir: number): void {
+    this.ratingFlash = 1.2;
+    this.ratingDir = dir;
   }
 
   updateStats(s: ShiftSession): void {
-    Ui.setText(this.subLabel, s.shop.name);
+    // 오른쪽 위: 가게 이름 + 실시간 평점 (오르면 초록 ▲, 내리면 빨강 ▼ 잠깐)
+    if (s.ratingOn) {
+      const arrow = this.ratingFlash > 0 ? (this.ratingDir > 0 ? " ▲" : " ▼") : "";
+      Ui.setText(this.subLabel, `${s.shop.name} · 평점 ★${s.rating.toFixed(1)}${arrow}`);
+      Ui.setColor(this.subLabel, this.ratingFlash > 0 ? (this.ratingDir > 0 ? rgb(0.55, 1.0, 0.6) : rgb(1.0, 0.55, 0.5)) : Ui.CREAM.withA(0.75));
+    } else Ui.setText(this.subLabel, s.shop.name);
     if (s.event) {
       // 미식가 이벤트: 왼쪽 = 코스 몇 번째, 가운데 막대 = 미식가 만족도
       const g = s.gourmet;
@@ -255,7 +294,8 @@ export class ShiftHud extends Node2D {
     this.toastTween = tw;
   }
 
-  process(_dt: number): void {
+  process(dt: number): void {
+    this.ratingFlash = Math.max(0, this.ratingFlash - dt);
     this.toastEl.style.opacity = String(this.toastState.a);
   }
 

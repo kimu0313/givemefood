@@ -8,6 +8,10 @@
 // 소리 끄기는 저장 (localStorage "pocha_tycoon_sound" = "off"). 노드(테스트)에서는 아무것도 안 한다.
 
 const SOUND_KEY = "pocha_tycoon_sound";
+const BGM_VOL = 0.32; // 배경 음악 크기
+const RAIN_VOL = 0.09; // 빗소리 크기
+const SFX_VOL = 0.7; // 효과음 크기
+const VOLUME_KEY = "pocha_tycoon_volume"; // 설정의 배경 음악·효과음 크기 (0~1, {"bgm":…, "sfx":…})
 
 // ---------------------------------------------------------------- 곡 데이터
 
@@ -135,12 +139,18 @@ class AudioHub {
   private timer: ReturnType<typeof setInterval> | null = null;
   private rain: { src: AudioBufferSourceNode; gain: GainNode } | null = null;
   private wantRain = false;
+  private bgmPaused = false; // 게임 일시정지 중 (배경 음악·빗소리 멈춤)
+  bgmVolume = 1.0; // 설정의 배경 음악 크기 0~1
+  sfxVolume = 1.0; // 설정의 효과음 크기 0~1
   private lastSfx: Record<string, number> = {};
 
   constructor() {
     if (typeof window === "undefined") return;
     try {
       this.muted = localStorage.getItem(SOUND_KEY) === "off";
+      const vol = JSON.parse(localStorage.getItem(VOLUME_KEY) ?? "{}") as { bgm?: unknown; sfx?: unknown };
+      if (typeof vol.bgm === "number") this.bgmVolume = Math.min(1, Math.max(0, vol.bgm));
+      if (typeof vol.sfx === "number") this.sfxVolume = Math.min(1, Math.max(0, vol.sfx));
     } catch {
       // 저장소를 못 쓰면 켠 채로
     }
@@ -168,10 +178,10 @@ class AudioHub {
       this.master.connect(comp);
       comp.connect(c.destination);
       this.bgmBus = c.createGain();
-      this.bgmBus.gain.value = 0.32;
+      this.bgmBus.gain.value = this.bgmPaused ? 0 : BGM_VOL * this.bgmVolume;
       this.bgmBus.connect(this.master);
       this.sfxBus = c.createGain();
-      this.sfxBus.gain.value = 0.7;
+      this.sfxBus.gain.value = SFX_VOL * this.sfxVolume;
       this.sfxBus.connect(this.master);
       const len = c.sampleRate * 2;
       this.noiseBuf = c.createBuffer(1, len, c.sampleRate);
@@ -179,8 +189,60 @@ class AudioHub {
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     }
     if (this.ctx.state === "suspended") void this.ctx.resume();
-    if (this.song !== null && this.timer === null) this.startSequencer();
+    if (this.song !== null && this.timer === null && !this.bgmPaused) this.startSequencer();
     if (this.wantRain && this.rain === null) this.startRain();
+  }
+
+  /**
+   * 일시정지 (2026-11-16 사용자 "게임 일시정지 할 때 브금도 멈추게"): 배경 음악과 빗소리를 멈췄다가,
+   * 풀면 멈춘 자리(마디)부터 이어서 튼다. 다른 곡으로 바뀌면(playBgm) 저절로 풀림.
+   */
+  setBgmPaused(p: boolean): void {
+    if (p === this.bgmPaused) return;
+    this.bgmPaused = p;
+    const c = this.ctx;
+    if (p) {
+      this.stopSequencer();
+      if (c !== null && this.bgmBus !== null) {
+        this.bgmBus.gain.cancelScheduledValues(c.currentTime);
+        this.bgmBus.gain.setTargetAtTime(0, c.currentTime, 0.03); // 미리 예약해 둔 음도 바로 끊김
+      }
+      if (c !== null && this.rain !== null) this.rain.gain.gain.setTargetAtTime(0, c.currentTime, 0.1);
+      return;
+    }
+    if (c === null) return;
+    if (this.bgmBus !== null) {
+      this.bgmBus.gain.cancelScheduledValues(c.currentTime);
+      this.bgmBus.gain.setTargetAtTime(BGM_VOL * this.bgmVolume, c.currentTime, 0.05);
+    }
+    if (this.rain !== null) this.rain.gain.gain.setTargetAtTime(RAIN_VOL, c.currentTime, 0.4);
+    if (this.song !== null && this.timer === null) {
+      this.nextTime = c.currentTime + 0.08;
+      this.timer = setInterval(() => this.schedule(), 25);
+    }
+  }
+
+  bgmIsPaused(): boolean {
+    return this.bgmPaused;
+  }
+
+  /**
+   * 설정의 소리 크기 (2026-11-16 사용자 "브금이랑 효과음 사운드도 조절하게"): kind = "bgm" 배경 음악 / "sfx" 효과음(빗소리 포함), v = 0~1.
+   * 바로 적용되고 이 기기에 저장. 끄기(muted, 지도의 소리 단추)와는 따로 — 끄면 둘 다 안 들림.
+   */
+  setVolume(kind: "bgm" | "sfx", v: number): void {
+    const x = Math.min(1, Math.max(0, v));
+    if (kind === "bgm") this.bgmVolume = x;
+    else this.sfxVolume = x;
+    try {
+      localStorage.setItem(VOLUME_KEY, JSON.stringify({ bgm: this.bgmVolume, sfx: this.sfxVolume }));
+    } catch {
+      // 저장 못 해도 이번 판은 적용
+    }
+    const c = this.ctx;
+    if (c === null) return;
+    if (kind === "bgm" && this.bgmBus !== null && !this.bgmPaused) this.bgmBus.gain.setTargetAtTime(BGM_VOL * x, c.currentTime, 0.03);
+    if (kind === "sfx" && this.sfxBus !== null) this.sfxBus.gain.setTargetAtTime(SFX_VOL * x, c.currentTime, 0.03);
   }
 
   setMuted(m: boolean): void {
@@ -196,6 +258,7 @@ class AudioHub {
   // ---------------------------------------------------------------- BGM
 
   playBgm(id: string): void {
+    this.setBgmPaused(false);
     if (id === this.bgmId) return;
     this.bgmId = id;
     this.stopRain();
@@ -374,7 +437,7 @@ class AudioHub {
     f.frequency.value = 2400;
     const g = c.createGain();
     g.gain.value = 0;
-    g.gain.setTargetAtTime(0.09, c.currentTime, 0.6);
+    if (!this.bgmPaused) g.gain.setTargetAtTime(RAIN_VOL, c.currentTime, 0.6);
     src.connect(f);
     f.connect(g);
     g.connect(this.sfxBus!);
@@ -390,6 +453,173 @@ class AudioHub {
       setTimeout(() => r.src.stop(), 900);
     }
     this.rain = null;
+  }
+
+  // ---------------------------------------------------------------- 만화 컷신 (미식가 등장 전)
+  // 2026-11-20 사용자 "만화가 나오게, 약간 웅성거리는 소리랑 긴장되는 소리 넣으면서":
+  //   웅성거림 = 잡음을 사람 목소리 높이(띠 거르개 3개)에 걸고 크기를 천천히 흔들기 + 짧은 말소리 조각을 무작위로
+  //   긴장감 = 낮은 두 음이 맞부딪치는 웅 소리 + 천천히 커지는 높은 떨림음(반음 차이) + 심장 박동 쿵쿵
+
+  private comic: { stop: () => void } | null = null;
+
+  startComicAmbience(): void {
+    this.stopComicAmbience();
+    const c = this.ctx;
+    if (c === null || this.noiseBuf === null || this.sfxBus === null) return;
+    const t0 = c.currentTime;
+    const bus = c.createGain();
+    bus.gain.value = 0;
+    bus.gain.setTargetAtTime(1, t0, 0.5);
+    bus.connect(this.sfxBus);
+    const nodes: AudioScheduledSourceNode[] = [];
+    // 웅성거림 바탕
+    const crowd = c.createBufferSource();
+    crowd.buffer = this.noiseBuf;
+    crowd.loop = true;
+    for (const [f, q, v] of [[420, 3, 0.16], [900, 4, 0.12], [1700, 5, 0.06]] as const) {
+      const bp = c.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = f;
+      bp.Q.value = q;
+      const g = c.createGain();
+      g.gain.value = v;
+      const lfo = c.createOscillator();
+      lfo.frequency.value = 0.35 + Math.random() * 0.5;
+      const lg = c.createGain();
+      lg.gain.value = v * 0.6;
+      lfo.connect(lg);
+      lg.connect(g.gain);
+      crowd.connect(bp);
+      bp.connect(g);
+      g.connect(bus);
+      lfo.start(t0);
+      nodes.push(lfo);
+    }
+    crowd.start(t0);
+    nodes.push(crowd);
+    // 낮은 웅 (두 음이 맞부딪쳐 흔들림)
+    const droneLp = c.createBiquadFilter();
+    droneLp.type = "lowpass";
+    droneLp.frequency.value = 260;
+    const droneG = c.createGain();
+    droneG.gain.value = 0;
+    droneG.gain.setTargetAtTime(0.16, t0, 1.2);
+    droneLp.connect(droneG);
+    droneG.connect(bus);
+    for (const f of [55, 55.9, 82.4]) {
+      const o = c.createOscillator();
+      o.type = "sawtooth";
+      o.frequency.value = f;
+      o.connect(droneLp);
+      o.start(t0);
+      nodes.push(o);
+    }
+    // 높은 떨림음 (반음 차이 두 음, 시간이 갈수록 커짐)
+    const trem = c.createGain();
+    trem.gain.value = 0;
+    trem.gain.setTargetAtTime(0.035, t0 + 2, 5);
+    const tremLfo = c.createOscillator();
+    tremLfo.frequency.value = 7;
+    const tremDepth = c.createGain();
+    tremDepth.gain.value = 0.02;
+    tremLfo.connect(tremDepth);
+    tremDepth.connect(trem.gain);
+    trem.connect(bus);
+    for (const f of [622.3, 659.3]) {
+      const o = c.createOscillator();
+      o.type = "triangle";
+      o.frequency.value = f;
+      o.connect(trem);
+      o.start(t0);
+      nodes.push(o);
+    }
+    tremLfo.start(t0);
+    nodes.push(tremLfo);
+    // 짧은 말소리 조각 + 심장 박동 (예약)
+    let beat = t0 + 1.2;
+    let next = t0 + 0.2;
+    const timer = setInterval(() => {
+      const now = c.currentTime;
+      while (next < now + 0.3) {
+        const f = 260 + Math.random() * 700;
+        this.noise(next, 0.06 + Math.random() * 0.12, 0.05 + Math.random() * 0.05, "bandpass", f, bus, 6, 0.02);
+        if (Math.random() < 0.25) {
+          const o = c.createOscillator();
+          o.type = "sine";
+          const g = c.createGain();
+          const p = 150 + Math.random() * 120;
+          o.frequency.setValueAtTime(p, next);
+          o.frequency.linearRampToValueAtTime(p * (0.85 + Math.random() * 0.3), next + 0.18);
+          this.env(g, next, 0.025, 0.03, 0.16);
+          o.connect(g);
+          g.connect(bus);
+          o.start(next);
+          o.stop(next + 0.3);
+        }
+        next += 0.07 + Math.random() * 0.16;
+      }
+      while (beat < now + 0.3) {
+        for (const [dt, v] of [[0, 0.5], [0.22, 0.32]] as const) {
+          const o = c.createOscillator();
+          o.type = "sine";
+          const g = c.createGain();
+          o.frequency.setValueAtTime(70, beat + dt);
+          o.frequency.exponentialRampToValueAtTime(38, beat + dt + 0.16);
+          this.env(g, beat + dt, v, 0.005, 0.18);
+          o.connect(g);
+          g.connect(bus);
+          o.start(beat + dt);
+          o.stop(beat + dt + 0.3);
+        }
+        beat += Math.max(0.62, 1.0 - (beat - t0) * 0.02); // 점점 빨라지는 심장
+      }
+    }, 60);
+    this.comic = {
+      stop: () => {
+        clearInterval(timer);
+        const t = c.currentTime;
+        bus.gain.cancelScheduledValues(t);
+        bus.gain.setTargetAtTime(0, t, 0.25);
+        setTimeout(() => {
+          for (const n of nodes) {
+            try {
+              n.stop();
+            } catch {
+              // 이미 멈춤
+            }
+          }
+          bus.disconnect();
+        }, 1500);
+      },
+    };
+  }
+
+  stopComicAmbience(): void {
+    this.comic?.stop();
+    this.comic = null;
+  }
+
+  /** 만화 한 컷이 나올 때: 쿵 (strong = 클로즈업 컷은 더 세게 + 날카로운 현 소리) */
+  comicHit(strong: boolean): void {
+    const c = this.ctx;
+    if (c === null || this.muted || this.sfxBus === null) return;
+    const t = c.currentTime;
+    const bus = this.sfxBus;
+    const o = c.createOscillator();
+    o.type = "sine";
+    const g = c.createGain();
+    o.frequency.setValueAtTime(strong ? 90 : 75, t);
+    o.frequency.exponentialRampToValueAtTime(32, t + 0.7);
+    this.env(g, t, strong ? 0.7 : 0.45, 0.005, 0.8);
+    o.connect(g);
+    g.connect(bus);
+    o.start(t);
+    o.stop(t + 1.0);
+    this.noise(t, 0.35, strong ? 0.22 : 0.12, "lowpass", 700, bus, 0.8, 0.01);
+    this.noise(t, 0.25, 0.06, "highpass", 3000, bus, 0.7, 0.08); // 종이 넘기는 듯한 쉭
+    if (strong) {
+      for (const n of ["D#3", "E3", "A#3"]) this.osc("sawtooth", hz(midi(n)), t, 0.9, 0.05, bus, 0.01);
+    }
   }
 
   // ---------------------------------------------------------------- 효과음

@@ -9,6 +9,7 @@ import * as Ink from "./ink.ts";
 import * as ArtAssets from "./art_assets.ts";
 import * as FoodShapes from "./food_shapes.ts";
 import * as DishArt from "./dish_art.ts";
+import { tr } from "../i18n/i18n.ts";
 
 export const WOOD = rgb(0.78, 0.62, 0.4);
 export const SPARKLE = rgb(1.0, 0.92, 0.45);
@@ -22,7 +23,7 @@ export type Opts = Record<string, boolean | number>;
 /** 가운데 정렬 텍스트 ("\n" 줄바꿈 지원) */
 /** 가운데 맞춘 글자 ("\n" 줄바꿈). weight = DISPLAY(900) 이면 굵은 제목 글꼴 */
 export function text(g: Gfx, s: string, center: V, size: number, color: Color, width = 640.0, weight = 400): void {
-  const lines = s.split("\n");
+  const lines = tr(s).split("\n"); // 줄 나누기 전에 통째로 번역 (사전에 줄바꿈째 든 글이 많음)
   const lh = size * 1.25;
   const y0 = center.y - lh * (lines.length - 1) * 0.5;
   for (let i = 0; i < lines.length; i++) {
@@ -31,7 +32,7 @@ export function text(g: Gfx, s: string, center: V, size: number, color: Color, w
 }
 
 export function textOutlined(g: Gfx, s: string, center: V, size: number, color: Color, outline: Color, outlineSize = 8, width = 640.0, weight = 400): void {
-  const lines = s.split("\n");
+  const lines = tr(s).split("\n");
   const lh = size * 1.25;
   const y0 = center.y - lh * (lines.length - 1) * 0.5;
   for (let i = 0; i < lines.length; i++) {
@@ -430,6 +431,12 @@ export function drawBowl(g: Gfx, menuId: string, c: V, s: number, quality: numbe
 
 /** 주문 말풍선·재료통에 쓰는 작은 아이콘 */
 export function drawIcon(g: Gfx, menuId: string, c: V, s: number, alpha = 1.0): void {
+  // 사용자 메뉴 그림 (UI 전용, ArtAssets.ICON_FILES): 도형 아이콘보다 조금 크게 (그림은 가로로 넓어서)
+  const icon = ArtAssets.menuIcon(menuId);
+  if (icon !== null) {
+    ArtAssets.drawCentered(g, icon, c, 76.0 * s, alpha);
+    return;
+  }
   const tex = ArtAssets.food(menuId);
   if (tex !== null) {
     ArtAssets.drawCentered(g, tex, c, 64.0 * s, alpha);

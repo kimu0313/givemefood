@@ -7,6 +7,7 @@ import * as D from "./defs.ts";
 import { CookItem, type TapResult } from "./cook_item.ts";
 import { CustomerLogic, type ServeResult } from "./customer_logic.ts";
 import { GourmetLogic } from "./gourmet_logic.ts";
+import { nextRating, priceMult, reviewOf, type Review } from "./review.ts";
 import { Signal } from "./signal.ts";
 import { Rng } from "../engine/rng.ts";
 import { clamp } from "../engine/geom.ts";
@@ -68,6 +69,9 @@ export interface ShiftResult {
   stock_left?: Record<string, number>; // 영업이 끝났을 때 남은 재료 (재료를 쓴 영업만)
   wasted?: number; // 버린 음식 (그릇 수)
   powder_used?: number; // 쓴 마법의 가루
+  rating_start?: number; // 영업 시작 때 가게 평점 (평점을 쓰는 영업만)
+  rating_end?: number;
+  review_tags?: Record<string, number>; // 평가 한마디 종류별 손님 수 (good / cheap / pricey / slow / bad)
 }
 
 export class ShiftSession {
@@ -79,6 +83,7 @@ export class ShiftSession {
   readonly moneyEarned = new Signal<[number, number, number, number]>(); // seat, paid, tip, quality
   readonly ended = new Signal();
   readonly quotaReached = new Signal(); // 오늘 매출이 처음으로 할당량을 넘음 (스토리)
+  readonly reviewed = new Signal<[number, Review, number]>(); // 손님이 떠나며 평가: seat, 평가, 바뀐 평점
 
   level = 1; // 스테이지 번호 (1~35)
   endless = false;
@@ -90,6 +95,8 @@ export class ShiftSession {
   rng = new Rng(1);
 
   burnerCount = D.BASE_BURNERS;
+  burnerValue = D.BASE_BURNERS; // 화구 업그레이드 단계 값 (칸 수는 4까지, 떡볶이 판 크기·불 조절은 이 값으로)
+  burnerPerfectBonus = 0.0; // 화구 "불 조절": 화구 위 음식 완벽 구간이 늘어나는 비율
   heatScale = 1.0;
   patienceMult = 1.0;
   menuPool: string[] = [];
@@ -124,12 +131,19 @@ export class ShiftSession {
   target = 0;
   regularsServed: string[] = [];
   regularsToday: string[] = []; // 이번 영업에 온 단골 (한 번씩만)
+  cameo = ""; // 이번 영업의 첫 손님으로 꼭 올 손님 종류 (예: 두 번째 가게 첫날 "imo"). 비어 있으면 없음
+  cameoCame = false; // cameo 손님이 들어왔음
   stock: Record<string, number> | null = null; // 메뉴 → 남은 재료 (인분). null = 무한 (테스트·봇·미식가 이벤트)
   wasted = 0; // 버린 음식 (그릇 수)
   frozen = false; // 튜토리얼 설명 중: 손님 인내심이 줄지 않음
   powder = 0; // 가진 마법의 가루 (영업 시작 때 GameState 에서 받음)
   powderArmed = false; // 가루 통을 눌러 준비함 → 다음에 올리는 음식에 뿌림
   powderUsed = 0;
+  prices: Record<string, string> = {}; // 메뉴 → 가격 단계 (cheap / normal / pricey), 없으면 보통
+  ratingOn = false; // 실시간 가게 평점을 쓰나 (테스트·봇은 끔)
+  rating = D.RATING_START;
+  ratingStart = D.RATING_START;
+  reviewTags: Record<string, number> = {};
   opened = true; // 가게 문을 열었나 (화면은 "준비 중" 팻말로 시작해서, 팻말을 뒤집어야 손님이 온다. 테스트·봇은 처음부터 열림)
 
   setupStory(level: number, burners: number, heatScale: number, patienceMult: number, seed = 0): void {
@@ -202,7 +216,9 @@ export class ShiftSession {
   }
 
   private setupCommon(burners: number, heatScale: number, patienceMult: number, seed: number): void {
-    this.burnerCount = clamp(burners, 1, D.MAX_BURNERS);
+    this.burnerCount = D.burnersFor(burners);
+    this.burnerValue = Math.max(1, Math.trunc(burners));
+    this.burnerPerfectBonus = D.burnerPerfectBonus(burners);
     this.heatScale = heatScale;
     this.patienceMult = patienceMult;
     if (seed !== 0) this.rng.seed = seed;
@@ -240,6 +256,34 @@ export class ShiftSession {
     this.powder = 0;
     this.powderArmed = false;
     this.powderUsed = 0;
+    this.prices = {};
+    this.ratingOn = false;
+    this.rating = D.RATING_START;
+    this.ratingStart = D.RATING_START;
+    this.reviewTags = {};
+  }
+
+  /** 메뉴 가격 단계와 가게 평점으로 영업 (setup 다음에 부름). 평점은 손님이 떠날 때마다 실시간으로 바뀜 */
+  useMarket(prices: Record<string, string>, rating: number): void {
+    this.prices = { ...prices };
+    this.ratingOn = true;
+    this.rating = rating;
+    this.ratingStart = rating;
+  }
+
+  priceLevel(menuId: string): string {
+    return this.prices[menuId] ?? "normal";
+  }
+
+  /** 영업 중 가격 바꾸기 (2026-11-17 사용자: 장보기 말고 영업 중인 가게에서). 다음에 내는 그릇부터 이 값 */
+  setPriceLevel(menuId: string, level: string): void {
+    if (!(level in D.PRICE_LEVELS)) return;
+    this.prices[menuId] = level;
+  }
+
+  /** 일반 손님에게 붙는 메뉴 값 (가격 단계 반영) */
+  postedPrice(menuId: string): number {
+    return Math.round((D.menuPrice(menuId) * priceMult(this.priceLevel(menuId))) / 10) * 10;
   }
 
   /** 가루 통 탭: 가루가 있으면 준비 ↔ 취소. 준비됐으면 true */
@@ -348,6 +392,9 @@ export class ShiftSession {
       stock_left: this.stock === null ? undefined : { ...this.stock },
       wasted: this.wasted,
       powder_used: this.powderUsed,
+      rating_start: this.ratingOn ? this.ratingStart : undefined,
+      rating_end: this.ratingOn ? this.rating : undefined,
+      review_tags: this.ratingOn ? { ...this.reviewTags } : undefined,
     };
   }
 
@@ -385,6 +432,7 @@ export class ShiftSession {
         // 큰 판·솥은 한 판 = 그릇 수만큼 재료 (남은 재료가 모자라면 있는 만큼만)
         const n = D.stationIsBatch(station) ? Math.min(this.batchSize(station), have) : 1;
         if (D.stationIsBatch(station)) item.setBatch(n);
+        if (station === D.STATION_BURNER) item.perfectBonus = this.burnerPerfectBonus;
         if (this.usePowder()) item.magic = true;
         arr[i] = item;
         this.takeStock(menuId, n);
@@ -400,7 +448,7 @@ export class ShiftSession {
 
   /** 큰 판·솥 한 번에 만드는 그릇 수 (떡볶이 판은 업그레이드로 늘어남) */
   batchSize(station: string): number {
-    if (station === "pan") return D.panPortions(this.burnerCount);
+    if (station === "pan") return D.panPortions(this.burnerValue);
     if (station === "steamer") return D.STEAMER_PORTIONS;
     return 1;
   }
@@ -477,7 +525,7 @@ export class ShiftSession {
     const c = this.seats[seat]!;
     if (c instanceof GourmetLogic) return this.serveGourmet(slot, seat, c);
     const quality = bowl.quality;
-    const res = c.serve(bowl.menu, quality, bowl.magic === true);
+    const res = c.serve(bowl.menu, quality, bowl.magic === true, priceMult(this.priceLevel(bowl.menu)), this.priceLevel(bowl.menu));
     const why = res.reason ?? "";
     if (res.result === "reject") {
       if (why === "wrong") this.customerReacted.emit(seat, why);
@@ -495,9 +543,18 @@ export class ShiftSession {
       this.quotaReached.emit();
     }
     if (why === "burnt") this.customerReacted.emit(seat, "burnt"); // 탄 음식: 투덜대며 받음 (값은 반만)
-    const tipLine = (tip > 0 && c.typeId === "regular") || res.magic === true; // 단골이 팁을 주며 / 마법의 맛에 감동해 한마디
-    if (res.magic === true) this.customerReacted.emit(seat, "magic");
-    else if (tipLine) this.customerReacted.emit(seat, "tip");
+    // 한마디: 마법의 맛 > 비싸다 (일반 손님) > 단골 팁 > 싸니까 괜찮다
+    const lvl = this.priceLevel(bowl.menu);
+    const sens = c.priceSensitive() && this.ratingOn;
+    let line = "";
+    if (res.magic === true) line = "magic";
+    else if (sens && lvl === "pricey" && res.result === "ok") line = quality === D.Q.PERFECT ? (this.rng.randf() < 0.4 ? "pricey_ok" : "") : "pricey";
+    else if (tip > 0 && (c.typeId === "regular" || c.typeId === "imo")) line = "tip";
+    else if (c.typeId === "imo" && res.done && res.result === "ok") line = "imo_bye"; // 이모는 다 먹으면 꼭 한마디
+    else if (sens && lvl === "cheap" && res.result === "ok" && quality !== D.Q.PERFECT && why !== "burnt") line = "cheap_ok";
+    if (line !== "" && why !== "burnt") this.customerReacted.emit(seat, line);
+    else if (line !== "" && why === "burnt" && line === "pricey") this.customerReacted.emit(seat, line);
+    const tipLine = line !== "";
     if (res.result === "angry") {
       this.customerReacted.emit(seat, "raw");
       this.customerLeaves(seat, "angry", D.RAW_LEAVE_DELAY);
@@ -715,6 +772,7 @@ export class ShiftSession {
     const e = this.eventDef ?? D.EVENTS[0];
     const c = new GourmetLogic(this.gourmetCourse(), e.patience * this.patienceMult);
     c.line = e.hello;
+    c.critic = e.critic;
     this.gourmet = c;
     this.seats[D.GOURMET_SEAT] = c;
     this.spawned += 1;
@@ -723,7 +781,9 @@ export class ShiftSession {
   }
 
   private spawnCustomer(seat: number): void {
-    let typeId = this.pickType();
+    // 정해진 첫 손님 (포장마차 이모): 그날 맨 처음 한 번만
+    const cameo = this.cameo !== "" && !this.cameoCame && this.spawned === 0 ? this.cameo : "";
+    let typeId = cameo !== "" ? cameo : this.pickType();
     // 올 단골이 없으면 (오늘 다 왔으면) 보통 손님으로
     const reg = typeId === "regular" ? this.pickRegular() : null;
     if (typeId === "regular" && reg === null) typeId = "normal";
@@ -731,7 +791,9 @@ export class ShiftSession {
     if (D.CUSTOMERS[typeId].max_items >= 2 && this.rng.randf() < D.SECOND_ITEM_CHANCE) count = 2;
     const menus: string[] = [];
     for (let k = 0; k < count; k++) menus.push(this.pickMenu());
-    const c = new CustomerLogic(typeId, menus, this.patienceMult);
+    // 가게 평점이 높을수록 일반 손님이 조금 더 기다려 줌 (단골은 그대로)
+    const ratingK = this.ratingOn && typeId !== "regular" ? D.ratingPatience(this.rating) : 1.0;
+    const c = new CustomerLogic(typeId, menus, this.patienceMult * ratingK);
     if (typeId === "regular" && reg !== null) {
       const r = reg;
       this.regularsToday.push(r.id);
@@ -739,6 +801,9 @@ export class ShiftSession {
       c.line = r.lines[this.rng.randiRange(0, r.lines.length - 1)];
     } else if (typeId === "jinsang") {
       c.swapAt = this.rng.randfRange(D.JINSANG_SWAP_MIN, D.JINSANG_SWAP_MAX);
+    } else if (typeId === "imo") {
+      c.line = D.IMO_HELLO;
+      this.cameoCame = true;
     }
     this.seats[seat] = c;
     this.spawned += 1;
@@ -805,6 +870,21 @@ export class ShiftSession {
     else if (reason === "angry") {
       this.angryCount += 1;
       if (this.endless) this.lives = Math.max(0, this.lives - 1);
+    }
+    // 가게 평점: 떠나는 손님의 평가 쪽으로 (영업이 끝나 내보내는 손님·미식가는 빼고)
+    if (this.ratingOn && reason !== "closing" && !(c instanceof GourmetLogic)) {
+      const served = c.items.filter((it) => it.served);
+      const rv = reviewOf({
+        angry: reason === "angry",
+        qualities: served.map((it) => it.quality),
+        priceLevels: served.map((it) => it.priceLevel ?? this.priceLevel(it.menu)),
+        priceSensitive: c.priceSensitive(),
+        patienceRatio: reason === "angry" && served.length === 0 ? 0 : c.lastPatienceRatio,
+        magic: c.gotMagic,
+      });
+      this.rating = nextRating(this.rating, rv.score, D.RATING_ALPHA);
+      this.reviewTags[rv.tag] = (this.reviewTags[rv.tag] ?? 0) + 1;
+      this.reviewed.emit(seat, rv, this.rating);
     }
     this.customerLeft.emit(seat, c, reason);
   }
