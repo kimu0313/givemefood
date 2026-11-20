@@ -336,7 +336,9 @@ export class SettlementScene extends Scene {
     if (step === 1) {
       // 소문이 퍼져 가게 앞에 손님들이 줄을 섬
       p.prepend(Ui.ribbon(gr.grade <= D.BAD_GRADE ? "나쁜 소문이 퍼졌어요…" : "소문이 퍼졌어요!", gr.grade <= D.BAD_GRADE ? Ui.BAD : Ui.EVENT, 44));
-      col.appendChild(this.crowdPicture(gr.grade));
+      // 사용자 그림이 있는 가게는 별 수에 맞는 가게 앞 그림 (5 = 끝없는 줄 … 1 = 자물쇠 잠긴 포장마차), 없으면 직접 그린 줄
+      const art = ArtAssets.fameImagePath(shop.id, gr.grade);
+      col.appendChild(art !== null ? this.famePicture(art) : this.crowdPicture(gr.grade));
       col.appendChild(Ui.heading(D.FAME_CROWD[gr.grade], 36, Ui.INK, null, "center", true));
       nextBtn("다음", () => this.fameStory(2));
       return;
@@ -372,6 +374,15 @@ export class SettlementScene extends Scene {
     col.appendChild(Ui.heading(`가게 평점 ★${before.toFixed(1)} → ★${after.toFixed(1)}`, 40, Ui.GOOD, null));
     col.appendChild(Ui.label("유명해진 가게는 손님이 더 너그럽게 기다려 줘요.", 27, Ui.MUTED, "center", true));
     nextBtn("좋아요!", () => this.finish(false, "map"));
+  }
+
+  /** 가게 앞 그림 (사용자 일러스트, 16:9) */
+  private famePicture(src: string): HTMLElement {
+    const img = document.createElement("img");
+    img.src = src;
+    img.alt = "";
+    Object.assign(img.style, { width: "1000px", height: "563px", objectFit: "cover", alignSelf: "center", borderRadius: "18px", border: "4px solid #3b2415", boxShadow: "0 10px 18px rgba(40,20,8,0.35)" });
+    return img;
   }
 
   /** 가게 앞에 줄 선 손님들 (별이 많을수록 길게). 혹평(별 1·2)이면 텅 빈 가게 앞 — 별 1 = 셔터 "당분간 휴업", 별 2 = 손님 하나가 돌아섬 */

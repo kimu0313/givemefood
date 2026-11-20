@@ -39,6 +39,15 @@ export const FOOD_FILES: string[] = [];
  */
 /** 지도 UI 조각 (ui/map_<이름>.webp, ui/map_widgets.ts mapUi) */
 /** 미식가 스테이지 만화 칸 (ui/comic.ts COMICS, tools/comic_panels.mjs) — 미리 받아 둠 */
+/**
+ * 미식가가 다녀간 뒤 "다음 이야기"의 가게 앞 그림 (별 1~5개마다 한 장, 2026-11-20 사용자 그림 — 첫 번째 가게).
+ * art_src/fame_<가게>_<별>.png → tools/to_webp.mjs → fame/<가게>_<별>.webp. 그림이 없는 가게는 settlement 가 직접 그림
+ */
+export const FAME_SHOPS = ["pocha"];
+export function fameImagePath(shopId: string, grade: number): string | null {
+  return FAME_SHOPS.includes(shopId) && grade >= 1 && grade <= 5 ? `${ROOT}/fame/${shopId}_${grade}.webp` : null;
+}
+export const FAME_PRELOAD = FAME_SHOPS.flatMap((sid) => [1, 2, 3, 4, 5].map((n) => `${ROOT}/fame/${sid}_${n}.webp`));
 export const COMIC_PRELOAD = ["pocha", "bunsik"].flatMap((sid) => [1, 2, 3, 4, 5, 6].map((n) => `${ROOT}/comic/${sid}_${n}.webp`));
 export const MAP_UI_FILES = [
   "btn_title", "btn_book", "btn_round", "title", "wallet", "plate", "btn_green", "btn_red", "btn_green_blank",
@@ -174,7 +183,7 @@ export function texture(path: string): HTMLImageElement | null {
 
 /** 시작할 때 미리 받아 둠. onProgress(받은 수, 전체 수) */
 export function preload(onProgress: (done: number, total: number) => void = () => {}): Promise<void> {
-  const paths = [TITLE_IMAGE, ...COMIC_PRELOAD] // 지도 배경 그림(WORLD_FILE)은 2026-11-20부터 안 씀 (map_art.SHOW_WORLD_IMAGE)
+  const paths = [TITLE_IMAGE, `${ROOT}/${WORLD_FILE}`, ...COMIC_PRELOAD, ...FAME_PRELOAD] // 지도 배경 그림 (map_art.SHOW_WORLD_IMAGE)
     .concat(Object.values(MAP_BUILDING_FILES).map((f) => `${ROOT}/map/${f}`))
     .concat(CUSTOMER_FILES.map((n) => `${ROOT}/customers/${n}.png`))
     .concat(BACKGROUND_FILES.map((n) => `${ROOT}/backgrounds/${n}.png`))

@@ -224,7 +224,7 @@ export function gridOf(x: number, y: number): [number, number] {
  * (예전 격자 기울기 0.4 에서 ROAD_TILT 만큼 그림 쪽으로, 0.18~0.6 사이). 꼭대기 = 두 팔이 만나는 곳. 꺾이는 곳은 둥글게.
  * false 면 예전처럼 배경 그림에서 딴 길 (map_world.ts WORLD_PATH).
  */
-export const ROAD_FITS_SHOPS = true;
+export const ROAD_FITS_SHOPS = false; // 배경 그림을 다시 쓰면 그림 속 길을 따라야 해서 끔 (2026-11-20)
 const ROAD_TILT = 0.8;
 const ROAD_BASE_SLOPE = 0.4;
 const ROAD_BOTTOM_Y = 946.0;

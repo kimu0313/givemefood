@@ -18,7 +18,7 @@ import { iso, type GRect, type Zone } from "./map_geo.ts";
 import { WORLD_IMG_H, WORLD_SCALE } from "./map_world.ts";
 
 /** 지도 배경 그림(map/world.webp)을 그릴지. 2026-11-20 사용자 "게임 스테이지 배경 없애 줘" → false (단색 바탕 + 길 띠). 그림 파일과 길 좌표는 그대로 둠 */
-export const SHOW_WORLD_IMAGE = false;
+export const SHOW_WORLD_IMAGE = true; // 2026-11-20 사용자 "스테이지 배경 일단 이걸로 넣어 줘" → 다시 켬 (같은 그림 art_src/map_world.png)
 
 // ---------------------------------------------------------------- 동네별 색
 
