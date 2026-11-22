@@ -398,6 +398,25 @@ export class ShiftHud extends Node2D {
     const drop = this.shutterState.drop;
     const h = hgt * drop;
     if (h <= 0.0) return;
+    // 2026-11-22 사용자 그림 (줄무늬 천막, ArtAssets.tarpImage): 화면을 덮는 한 장이 위에서 내려오고, 아래 끝에 그림자 · 먹선
+    const img = ArtAssets.tarpImage();
+    if (img !== null) {
+      const ctx = g.ctx;
+      ctx.save();
+      ctx.fillStyle = "rgba(20, 8, 4, 0.35)"; // 천막 아래로 떨어지는 그림자
+      ctx.fillRect(0, h, w, Math.min(26, hgt - h));
+      ctx.beginPath();
+      ctx.rect(0, 0, w, h);
+      ctx.clip();
+      ArtAssets.drawCover(ctx, img, 0, h - hgt, w, hgt);
+      ctx.restore();
+      g.rect(new R(0, h - 6, w, 6), rgb(0.23, 0.1, 0.06)); // 아래 끝 먹선 (천막 단)
+      if (drop > 0.85) {
+        const a = clamp((drop - 0.85) / 0.15, 0.0, 1.0);
+        FoodArt.textOutlined(g, this.shutterCaption, v(w * 0.5, hgt * 0.45), 84, rgb(1, 1, 1, a), rgb(0.3, 0.08, 0.05, a), 14, w);
+      }
+      return;
+    }
     const stripe = 90.0;
     const n = Math.ceil(w / stripe);
     for (let i = 0; i < n; i++) {

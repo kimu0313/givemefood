@@ -108,6 +108,7 @@ export class ShiftSession {
 
   stations: Record<string, (CookItem | null)[]> = {}; // 조리도구 종류 → CookItem 또는 null 배열 (화구는 MAX_BURNERS칸, burnerCount칸만 사용)
   cutting: Cutting | null = null; // 도마: {menu, quality, taps} 또는 비어 있음
+  boardQueue: Cutting[] = []; // 도마 옆에서 기다리는 꺼낸 음식 (D.BOARD_QUEUE_MAX 까지, 도마가 비면 차례로 올라감)
   tray: (Bowl | null)[] = []; // 완성 그릇
   seats: (CustomerLogic | null)[] = [];
   seatWait: number[] = []; // 자리마다 다음 손님이 앉을 수 있기까지 남은 시간
@@ -236,6 +237,7 @@ export class ShiftSession {
     this.seatWait = new Array(D.SEATS).fill(0.0);
     this.seatRefill = new Array(D.SEATS).fill(false);
     this.cutting = null;
+    this.boardQueue = [];
     this.spawned = 0;
     this.spawnTimer = D.FIRST_SPAWN_DELAY;
     this.arrivalCooldown = 0.0;
@@ -459,7 +461,7 @@ export class ShiftSession {
     if (item === null || this.isOver) return { action: "none" };
     if (item.nextTapAction() === "take_out") {
       const toBoard = D.usesBoard(item.menuId);
-      if (toBoard && this.cutting !== null) return { action: "blocked", reason: "board" };
+      if (toBoard && this.cutting !== null && this.boardQueue.length >= D.BOARD_QUEUE_MAX) return { action: "blocked", reason: "board" };
       if (!toBoard && this.freeTraySlot(item.menuId) < 0) return { action: "blocked", reason: "tray", menu: item.menuId };
       let q: number;
       if (item.isBatch()) {
@@ -471,7 +473,9 @@ export class ShiftSession {
       }
       const left = item.isBatch() ? item.portions : 0;
       if (toBoard) {
-        this.cutting = { menu: item.menuId, quality: q, taps: 0, magic: item.magic };
+        const cut: Cutting = { menu: item.menuId, quality: q, taps: 0, magic: item.magic };
+        if (this.cutting === null) this.cutting = cut;
+        else this.boardQueue.push(cut); // 도마가 바쁘면 옆에서 기다림
         return { action: "to_board", quality: q, menu: item.menuId, left };
       }
       const slot = this.freeTraySlot(item.menuId);
@@ -491,7 +495,7 @@ export class ShiftSession {
     const slot = this.freeTraySlot(this.cutting.menu);
     if (slot < 0) return { action: "blocked", reason: "tray", menu: this.cutting.menu };
     this.tray[slot] = { menu: this.cutting.menu, quality: this.cutting.quality, magic: this.cutting.magic };
-    this.cutting = null;
+    this.cutting = this.boardQueue.shift() ?? null; // 기다리던 다음 음식이 도마로
     return { action: "plated", slot };
   }
 
@@ -513,7 +517,7 @@ export class ShiftSession {
   discardCutting(): number {
     if (this.cutting === null) return 0;
     const menu = this.cutting.menu;
-    this.cutting = null;
+    this.cutting = this.boardQueue.shift() ?? null;
     return this.addWaste(menu);
   }
 
@@ -696,6 +700,7 @@ export class ShiftSession {
       }
     }
     if (this.cutting !== null) out[this.cutting.menu] = (out[this.cutting.menu] ?? 0) + 1;
+    for (const q of this.boardQueue) out[q.menu] = (out[q.menu] ?? 0) + 1;
     for (const bowl of this.tray) {
       if (bowl !== null) out[bowl.menu] = (out[bowl.menu] ?? 0) + 1;
     }

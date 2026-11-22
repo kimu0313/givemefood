@@ -88,6 +88,7 @@ export class ShiftBot {
       }
     }
     if (s.cutting !== null && s.cutting.menu === menu) n -= 1;
+    for (const q of s.boardQueue) if (q.menu === menu) n -= 1;
     return n;
   }
 
@@ -113,6 +114,7 @@ export class ShiftBot {
     }
     for (const bowl of s.tray) if (bowl !== null && bowl.menu === menu) n -= 1;
     if (s.cutting !== null && s.cutting.menu === menu) n -= 1;
+    for (const q of s.boardQueue) if (q.menu === menu) n -= 1;
     return n;
   }
 

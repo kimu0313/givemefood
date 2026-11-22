@@ -76,6 +76,24 @@ function plankButton(piece: string, text: string, icon: string | null): HTMLButt
   return b;
 }
 
+/** 잠긴 스테이지 그림 창 (ui/popup_lock.webp 1542×950, 원본 그림에서 (23, 17) 잘라 냄) — 자리는 잘라 낸 그림 px */
+const LOCK_POP = {
+  w: 1542,
+  h: 950,
+  show: 820, // 화면 폭 (설계 px)
+  title: [450, 40, 1085, 150], // 리본 가운데
+  shop: [250, 418, 1292, 492], // 가게 이름 (자물쇠 아래)
+  msg: [120, 508, 1422, 604], // 안내 (밑줄 위)
+  ok: [86, 646, 1462, 846], // 확인 버튼 (그림)
+};
+if (typeof document !== "undefined") {
+  const st = document.createElement("style");
+  st.textContent = `.lock-pop-ok { background: transparent; border: 0; padding: 0; cursor: pointer; border-radius: 40px; font-family: inherit; transition: background 0.12s, transform 0.08s; }
+.lock-pop-ok:hover { background: rgba(255, 240, 210, 0.12); }
+.lock-pop-ok:active { background: rgba(60, 30, 10, 0.14); transform: translateY(2px); }`;
+  document.head.appendChild(st);
+}
+
 /** 소리 켜기/끄기 (동그란 나무 버튼) */
 function plankSound(): HTMLButtonElement {
   const b = document.createElement("button");
@@ -698,18 +716,20 @@ export class StageMap extends Scene {
     this.openLevelPopup(lv);
   }
 
-  /** 잠긴 스테이지를 눌렀을 때: 아직 안 연 가게의 스테이지면 가게를 사야 한다고 알려 주고 (살 수 있으면 그 자리에서 "가게 열기") */
+  /**
+   * 잠긴 스테이지를 눌렀을 때. 2026-11-22 사용자 그림 ("안 깨진 스테이지 눌렀을 때 나오는 UI 이렇게", art_src/ui_lock_popup.png →
+   * ui/popup_lock.webp, tools/lock_popup_art.mjs): 양피지 창 + 리본 "스테이지 N" + 자물쇠 + 가게 이름 + 안내 + "확인" (글씨는 게임이 씀).
+   * 아직 안 연 가게인데 지금 살 수 있으면 (지갑 · 가게 값 · "가게 열기" 가 필요해서) 예전 창 그대로.
+   */
   private toastLocked(lv: number): void {
     const shop = D.shopForLevel(lv);
     const sid = shop.id;
-    const col = this.panelPopup(D.levelName(lv), Ui.SECONDARY);
-    const lock = Ui.icon(Ui.ICON.lock, 84);
-    lock.style.alignSelf = "center";
-    col.appendChild(lock);
-    col.appendChild(Ui.label(shop.name, 34, Ui.MUTED));
-    if (GameState.shopOpened(sid)) {
-      col.appendChild(Ui.label("앞 스테이지를 먼저 깨야 열려요.", 34, Ui.INK));
-    } else if (GameState.canBuyShop(sid)) {
+    if (!GameState.shopOpened(sid) && GameState.canBuyShop(sid)) {
+      const col = this.panelPopup(D.levelName(lv), Ui.SECONDARY);
+      const lock = Ui.icon(Ui.ICON.lock, 84);
+      lock.style.alignSelf = "center";
+      col.appendChild(lock);
+      col.appendChild(Ui.label(shop.name, 34, Ui.MUTED));
       const cost = D.shopOpenCost(sid);
       const enough = GameState.wallet >= cost;
       col.appendChild(Ui.label(`'${shop.name}'${D.josa(shop.name, "을", "를")} 열면 시작할 수 있어요.`, 32, Ui.INK, "center", true));
@@ -739,14 +759,60 @@ export class StageMap extends Scene {
       });
       row.appendChild(buy);
       return;
-    } else {
+    }
+    let msg = "앞 스테이지를 먼저 깨야 열려요.";
+    if (!GameState.shopOpened(sid)) {
       const prev = D.SHOPS[Math.max(0, D.shopIndex(sid) - 1)];
       const pn = D.levelName(prev.last_level);
-      col.appendChild(Ui.label(`${pn}${D.josa(pn, "을", "를")} 깨면 돈을 모아 '${shop.name}'${D.josa(shop.name, "을", "를")} 열 수 있어요.`, 32, Ui.INK, "center", true));
+      msg = `${pn}${D.josa(pn, "을", "를")} 깨면 돈을 모아 '${shop.name}'${D.josa(shop.name, "을", "를")} 열 수 있어요.`;
     }
-    const ok = Ui.button("확인", Ui.SECONDARY, 38, 110);
+    this.lockPopup(D.levelName(lv), shop.name, msg);
+  }
+
+  /** 잠긴 스테이지 그림 창 (자리 = 잘라 낸 그림 px, LOCK_POP) */
+  private lockPopup(title: string, shopName: string, msg: string): void {
+    this.closePopup();
+    this.dragging = false;
+    this.vel = 0.0;
+    const ov = Ui.overlay(this.ui, 0.6);
+    ov.classList.add("center");
+    const k = LOCK_POP.show / LOCK_POP.w;
+    const box = Ui.div("panel pop lock-pop");
+    Object.assign(box.style, {
+      position: "relative",
+      width: `${LOCK_POP.show}px`,
+      height: `${Math.round(LOCK_POP.h * k)}px`,
+      marginTop: "40px",
+      padding: "0",
+      background: 'url("assets/art/ui/popup_lock.webp") center / 100% 100% no-repeat',
+      border: "0",
+      boxShadow: "none",
+    });
+    const at = (el: HTMLElement, [x0, y0, x1, y1]: number[]): HTMLElement => {
+      Object.assign(el.style, {
+        position: "absolute",
+        left: `${x0 * k}px`,
+        top: `${y0 * k}px`,
+        width: `${(x1 - x0) * k}px`,
+        height: `${(y1 - y0) * k}px`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        textAlign: "center",
+      });
+      box.appendChild(el);
+      return el;
+    };
+    at(Ui.heading(title, 52, Ui.CREAM, Ui.INK), LOCK_POP.title);
+    at(Ui.label(shopName, 34, rgb(0.45, 0.3, 0.19)), LOCK_POP.shop);
+    at(Ui.label(msg, msg.length > 22 ? 29 : 34, Ui.INK, "center", true), LOCK_POP.msg);
+    const ok = document.createElement("button");
+    ok.className = "lock-pop-ok";
+    ok.appendChild(Ui.heading("확인", 50, Ui.CREAM, Ui.INK));
+    at(ok, LOCK_POP.ok);
     Ui.onPress(ok, () => this.closePopup());
-    col.appendChild(ok);
+    ov.appendChild(box);
+    this.popup = ov;
   }
 
   openLevelPopup(lv: number): void {

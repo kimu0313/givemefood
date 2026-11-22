@@ -10,6 +10,7 @@ import * as ArtAssets from "../src/art/art_assets.ts";
 import { COUNTER_Y } from "../src/shift/shift_view.ts";
 import { KitchenView } from "../src/shift/kitchen_view.ts";
 import { ART_BANDS, SHOP_ART, mapY } from "../src/art/shop_art.ts";
+import { SUPPLY_UI_META } from "../src/art/supply_ui_meta.ts";
 
 function run(item: CookItem, seconds: number): void {
   let t = 0.0;
@@ -38,6 +39,12 @@ export function viewTests(ok: (cond: boolean, msg: string) => void): void {
   }
   // 2026-11-18 지도 UI 조각 (사용자 예시 그림에서 오림, tools/map_ui_art.mjs)
   ok(ArtAssets.MAP_UI_FILES.every((n) => fs.existsSync(`public/assets/art/ui/map_${n}.webp`)), "지도 UI 조각 파일");
+  ok(fs.existsSync("public/assets/art/ui/popup_lock.webp") && ["awning", "card", "disc", "buy", "back", "wallet"].every((n) => fs.existsSync(`public/assets/art/ui/upg_${n}.webp`)), "잠긴 스테이지 창 · 손보기 화면 그림 파일");
+  ok(["card", "star", "burst_l", "burst_r", ...["blue", "orange", "brown"].flatMap((c) => ["l", "m", "r"].map((p) => `${c}_${p}`))].every((n) => fs.existsSync(`public/assets/art/ui/st_${n}.webp`)), "정산 화면 그림 조각 파일 (영수증 · 별 · 반짝 선 · 버튼 3조각)");
+  ok(fs.existsSync(`public/${ArtAssets.ROOT}/${ArtAssets.TARP_FILE}`), "영업 끝 천막 · 정산 배경 그림 파일 (ui/tarp.webp)");
+  ok(fs.existsSync(`public/${ArtAssets.ROOT}/${ArtAssets.POWDER_FILE}`), "마법의 가루 병 그림 파일 (ui/powder.webp)");
+  ok(["back", "front"].every((n) => fs.existsSync(`public/assets/art/ui/basket_${n}.webp`)), "재료 바구니 그림 파일 (뒤 · 앞 테두리)");
+  ok(Object.keys(SUPPLY_UI_META).every((n) => fs.existsSync(`public/assets/art/ui/mk_${n}.webp`)) && ["bg", "front", "bubble", "tab_on", "lock", "wallet_l", "wallet_m", "wallet_r"].every((n) => n in SUPPLY_UI_META), "재료 가게 그림 조각 파일 (바탕 · 계산대 앞 · 말풍선 · 빨간 탭 · 자물쇠 · 지갑 3조각)");
   // 2026-11-18 다섯 가게 모두 사용자 그림 (뒤층 + 앞층 파일), 그림 속 도구 자리는 가게 배치(D.shopLayout)와 종류·순서가 같음
   // (다르면 ShiftView.placeArtStations 가 몰래 보통 배치로 돌아가서 그림 위에 도구 틀이 겹침)
   for (const shop of D.SHOPS) {

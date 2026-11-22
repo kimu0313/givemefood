@@ -237,6 +237,24 @@ export class KitchenView extends Node2D {
     const bob = armed ? Math.sin(t * 6.0) * 4.0 : 0.0;
     const body = new R(c.x - 48, c.y - 56 + bob, 96, 100);
     FoodArt.ellipse(g, v(c.x, c.y + 48), 56.0, 12.0, rgb(0, 0, 0, 0.25));
+    // 2026-11-22 사용자 그림 (코르크 마개 유리병 + 보라 가루 + 끈 · 별 꼬리표). 다 쓰면 흐린 회색
+    const jar = ArtAssets.powderImage();
+    if (jar !== null) {
+      const jh = 140.0;
+      const jw = (jar.width / jar.height) * jh;
+      const ctx = g.ctx;
+      ctx.save();
+      if (have <= 0) {
+        ctx.filter = "grayscale(1) brightness(0.75)";
+        ctx.globalAlpha = 0.8;
+      }
+      ctx.drawImage(jar, c.x - jw * 0.5, c.y + 50 - jh + bob, jw, jh);
+      ctx.restore();
+      if (have > 0) FoodArt.magicSparkles(g, v(c.x, c.y - 6 + bob), 62.0, t, armed ? 6 : 3);
+      FoodArt.textOutlined(g, armed ? "뿌릴 준비!" : "마법의 가루", v(c.x, c.y + 64), 21, armed ? rgb(1.0, 0.85, 1.0) : rgb(1.0, 0.95, 0.85), rgb(0.25, 0.1, 0.3), 6, 190);
+      this.powderBadge(g, v(c.x + jw * 0.5 - 6, c.y + 50 - jh + 22 + bob), have);
+      return;
+    }
     // 가루 (남은 개수만큼)
     const fill = Math.min(1.0, have / 5.0);
     if (fill > 0) {
@@ -253,7 +271,11 @@ export class KitchenView extends Node2D {
     if (have > 0) FoodArt.magicSparkles(g, v(c.x, body.y + 34 + bob), 62.0, t, armed ? 6 : 3);
     // 이름표 + 개수
     FoodArt.textOutlined(g, armed ? "뿌릴 준비!" : "마법의 가루", v(c.x, c.y + 64), 21, armed ? rgb(1.0, 0.85, 1.0) : rgb(1.0, 0.95, 0.85), rgb(0.25, 0.1, 0.3), 6, 190);
-    const bc = v(body.endX - 4, body.y - 14);
+    this.powderBadge(g, v(body.endX - 4, body.y - 14), have);
+  }
+
+  /** 가루 통 개수 배지 (보라 동그라미) */
+  private powderBadge(g: Gfx, bc: V, have: number): void {
     g.circle(bc.add(v(0, 3)), 22.0, rgb(0, 0, 0, 0.3));
     g.circle(bc, 22.0, rgb(0.23, 0.14, 0.08));
     g.circle(bc, 18.0, have > 0 ? rgb(0.62, 0.32, 0.88) : rgb(0.5, 0.48, 0.5));
@@ -316,6 +338,23 @@ export class KitchenView extends Node2D {
     for (let k = 0; k < need; k++) g.circle(c.add(v((k - (need - 1) * 0.5) * 24.0, 40)), 7.0, k < taps ? rgb(0.3, 0.6, 0.3) : rgb(0.6, 0.48, 0.34));
     const hint = D.boardSteps(menu).length > 0 ? `탭: ${D.boardStepVerb(menu, taps)} (${taps}/${need})` : `탭해서 ${D.boardVerb(menu)} ${taps}/${need}`;
     FoodArt.textOutlined(g, hint, c.add(v(0, -40)), 20, WHITE, rgb(0, 0, 0, 0.6), 5, r.w);
+    this.drawBoardQueue(g, r);
+  }
+
+  /** 도마 오른쪽 카운터에 기다리는 꺼낸 음식: 작은 그릇으로 놓고 "대기 n" (D.BOARD_QUEUE_MAX). 왼쪽은 완성 칸이라 오른쪽 (세 가게 모두 장식만 있음) */
+  private drawBoardQueue(g: Gfx, r: R): void {
+    const q = this.session.boardQueue;
+    if (q.length === 0) return;
+    const base = v(r.x + r.w + 34, r.y + r.h * 0.6);
+    for (let i = 0; i < q.length; i++) {
+      const p = base.add(v(i * 30, 0));
+      g.circle(p.add(v(0, 3)), 22, rgb(0, 0, 0, 0.3));
+      g.circle(p, 22, rgb(0.97, 0.94, 0.88));
+      g.arc(p, 22, 0, Math.PI * 2, rgb(0.23, 0.14, 0.08), 3);
+      drawBoardFood(g, q[i].menu, 0, p.add(v(0, -2)), 0.2, FoodArt.qualityColor(q[i].menu, q[i].quality));
+    }
+    const lx = base.x + (q.length - 1) * 15;
+    FoodArt.textOutlined(g, `대기 ${q.length}`, v(lx, base.y - 36), 20, rgb(1, 0.92, 0.6), rgb(0, 0, 0, 0.7), 5, 120);
   }
 
   /** 빈 도마에 쓰는 안내: 도마를 쓰는 메뉴가 아직 안 열렸으면 언제 열리는지 */

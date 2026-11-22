@@ -96,7 +96,7 @@ export const GAME: [string, string, string, string][] = [
   ["꺼내기", "Take out", "取り出す", "取出"],
   ["닭강정", "Sweet Crispy Chicken", "タッカンジョン", "甜辣炸鸡块"],
   ["버무리기", "Toss", "からめる", "裹酱"],
-  ["튀김기에서 6~9초에 건진 뒤, 도마를 3번 탭해서 양념에 버무려요.", "Take it out of the fryer at 6–9s, then tap the board 3 times to toss it in sauce.", "フライヤーから6〜9秒で上げたら、まな板を3回タップしてタレをからめます。", "在炸锅里6～9秒捞出，再点砧板3次裹上酱汁。"],
+  ["튀김기에서 6~9초에 건지면 바로 나가요.", "Take it out of the fryer at 6–9s and it's ready to serve.", "フライヤーから6〜9秒で上げたら、そのまま出せます。", "在炸锅里6～9秒捞出就能直接上桌。"],
   ["핫도그", "Corn Dog", "ハットグ", "韩式热狗"],
   ["한쪽이 완벽할 때 탭해서 굴리고, 반대쪽도 완벽할 때 건져요. 구간이 짧아요!", "Tap to roll it when one side is perfect, and take it out when the other side is perfect too. Short window!", "片面が完璧になったらタップして転がし、反対側も完璧になったら引き上げます。ゾーンが短いです!", "一面完美时点击翻滚，另一面也完美时捞出。区间很短！"],
   ["한쪽", "One side", "片面", "一面"],

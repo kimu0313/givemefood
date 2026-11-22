@@ -339,7 +339,6 @@ function testSessionCuttingAndWaste(): void {
   cookFor(s, 5.5);
   const out = s.tapStation("steamer", 0);
   ok(out.action === "to_board" && out.quality === Q.PERFECT && s.cutting!.menu === "sundae", "다 쪄진 순대·내장을 솥에서 꺼내 도마로");
-  ok(s.tapStation("steamer", 0).action === "blocked", "도마가 차 있으면 솥에서 더 못 꺼냄");
   ok(s.tapCutting().action === "cut" && s.tapCutting().action === "cut", "도마 1, 2번째 탭 = 썰기");
   const plated = s.tapCutting();
   ok(plated.action === "plated" && s.cutting === null, "3번째 탭에 그릇에 담김");
@@ -656,10 +655,9 @@ function testNewMenus(): void {
   dk.setupStory(17, 2, 1.0, 1.0, 1);
   const di = dk.addIngredient("dakgangjeong");
   cookFor(dk, 7.0);
-  ok(dk.tapStation("fryer", di).action === "to_board", "닭강정: 튀김기 → 도마");
-  dk.tapCutting();
-  dk.tapCutting();
-  ok(dk.tapCutting().action === "plated", "닭강정: 3번 버무리면 완성");
+  const dko = dk.tapStation("fryer", di);
+  ok(dko.action === "take_out" && dk.cutting === null && dk.tray[dko.slot!]!.menu === "dakgangjeong", "닭강정: 다 튀기면 도마 없이 바로 완성 칸으로 (2026-11-22)");
+  ok(!D.usesBoard("dakgangjeong"), "닭강정은 도마를 안 씀");
 
   const bc = new ShiftSession();
   bc.setupStory(25, 2, 1.0, 1.0, 1);
@@ -930,6 +928,29 @@ function testEvents(): void {
     }
     ok(fast >= 4 && slow <= 4, `미식가 이벤트 ${e.shop}: 잘하면 별 4~5개 (${fast}), 느리면 5개는 어려움 (${slow})`);
   }
+}
+
+/** 도마 옆 대기 줄 (2026-11-22 "닭강정 다 튀겨지면 꺼내야 하는데 안 눌러짐"): 도마가 바빠도 튀김기에서 꺼낼 수 있음 */
+function testBoardQueue(): void {
+  const s = new ShiftSession();
+  s.setupStory(5, 2, 1.0, 1.0, 5);
+  ok(s.addIngredient("sundae") === 0, "순대 재료 → 큰 솥");
+  for (let k = 0; k < 6 * 60; k++) s.update(1 / 60);
+  const r0 = s.tapStation("steamer", 0);
+  ok(r0.action === "to_board" && s.cutting !== null && s.boardQueue.length === 0, "첫 순대 → 도마");
+  const r1 = s.tapStation("steamer", 0);
+  ok(r1.action === "to_board" && s.boardQueue.length === 1, "도마가 써는 중이어도 다음 순대를 꺼낼 수 있음 (도마 옆에서 기다림)");
+  s.tapStation("steamer", 0);
+  s.tapStation("steamer", 0);
+  ok(s.boardQueue.length === D.BOARD_QUEUE_MAX && s.stationItem("steamer", 0) === null, `도마 옆 대기는 ${D.BOARD_QUEUE_MAX}그릇까지 (솥 4그릇 다 꺼냄)`);
+  ok((s.supplyCounts().sundae ?? 0) === 4, "대기 중인 그릇도 만들어 둔 수에 셈");
+  s.addIngredient("sundae");
+  for (let k = 0; k < 6 * 60; k++) s.update(1 / 60);
+  const r4 = s.tapStation("steamer", 0);
+  ok(r4.action === "blocked" && r4.reason === "board" && s.stationItem("steamer", 0)!.portions === D.STEAMER_PORTIONS, "대기 줄이 꽉 차면 그때만 못 꺼냄");
+  for (let k = 0; k < D.boardTaps("sundae"); k++) s.tapCutting();
+  ok(s.cutting !== null && s.boardQueue.length === D.BOARD_QUEUE_MAX - 1, "도마 일이 끝나면 기다리던 순대가 도마로 올라감");
+  ok(s.discardCutting() >= 0 && s.cutting !== null && s.boardQueue.length === D.BOARD_QUEUE_MAX - 2, "도마 음식을 버려도 다음 차례가 올라감");
 }
 
 /** 단골 6명 (가게마다 새 단골 2·1·1·1·1명), 재료 (사기·쓰기·품절·외상·저장), 튜토리얼 상태 */
@@ -1218,7 +1239,8 @@ testGameState();
 testAccounts();
 testEvents();
 testImo();
-testRegularsAndStock();
+testBoardQueue();
+  testRegularsAndStock();
 testSignAndMagic();
 testPricesAndRating();
 if (!process.argv.includes("--quick")) balanceReport();

@@ -1,5 +1,8 @@
 // 정산: 매출·팁·별점·다음 레벨에 열리는 것, 리워드 광고(매출 2배 / 할당량 미달 시 통과 1회)
 // 버튼: 깼으면 다음 스테이지 / 지도로 (가게 마지막 스테이지면 다음으로 → 지도에서 새 가게 사기), 못 깼으면 광고로 통과 / 다시 도전 / 지도로
+// 2026-11-22 사용자 예시 그림 ("스테이지 끝나면 나오는 화면 UI 이걸로", art_src/ui_settlement_ref.png 1679×937): 왼쪽 손그림 영수증 종이 + 주황 리본,
+//   오른쪽 반짝 선 달린 제목 · 손그림 금색 별 · 나무 칩 안내 · 파랑/갈색/주황 손그림 버튼. 조각은 tools/settlement_ui_art.mjs → ui/st_*.webp,
+//   글씨는 모두 게임 글꼴로 씀. 자리 = 예시 그림 px × ST_K (1679 폭 → 1920). 버튼은 왼끝·가운데·오른끝 3조각이라 폭이 달라도 됨.
 
 import { type Color, R, rgb, v } from "../engine/geom.ts";
 import { tr } from "../i18n/i18n.ts";
@@ -19,6 +22,135 @@ import { TARP_CREAM, TARP_RED } from "../art/street_art.ts";
 import { gourmetPortrait } from "./portrait.ts";
 import { CanvasWidget } from "../engine/game.ts";
 import * as ArtAssets from "../art/art_assets.ts";
+import * as FoodArt from "../art/food_art.ts";
+
+const ST_K = 1920 / 1679;
+const SU = (n: number): string => `${Math.round(n * ST_K)}px`;
+const ST_ART = (n: string): string => `url("assets/art/ui/st_${n}.webp")`;
+/** 버튼 3조각 크기 (잘라 낸 그림 px): 높이, 왼끝 폭, 오른끝 폭 */
+const ST_BTN: Record<"blue" | "orange" | "brown", { h: number; l: number; r: number }> = {
+  blue: { h: 110, l: 82, r: 82 },
+  orange: { h: 114, l: 80, r: 84 },
+  brown: { h: 112, l: 60, r: 60 },
+};
+const ST_CSS = `
+.st { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; pointer-events: none; }
+.st .st-card { position: absolute; background: center / 100% 100% no-repeat; }
+.st .st-rc { position: absolute; display: flex; flex-direction: column; justify-content: space-evenly; }
+.st .st-side { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.st .st-mid { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; overflow: hidden; width: 100%; }
+.st .st-btns { flex: 0 0 auto; width: 100%; display: flex; flex-direction: column; gap: 12px; }
+.st .st-row { display: flex; gap: 14px; width: 100%; }
+.st-btn { pointer-events: auto; position: relative; border: 0; padding: 0 60px 8px; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  gap: 16px; background-color: transparent; background-repeat: no-repeat; font-family: inherit; color: #fff8ea; font-size: 46px;
+  -webkit-text-stroke: 10px #2b1a10; paint-order: stroke fill; transition: transform 0.08s, filter 0.12s; filter: drop-shadow(0 5px 5px rgba(0,0,0,0.35)); }
+.st-btn .ic { flex: 0 0 auto; width: 1.15em; height: 1.15em; display: flex; }
+.st-btn:hover:not(:disabled) { filter: drop-shadow(0 5px 5px rgba(0,0,0,0.35)) brightness(1.07); }
+.st-btn:active:not(:disabled) { transform: translateY(5px); }
+.st-btn:disabled { cursor: default; filter: grayscale(0.85) brightness(0.9); }
+.st-btn.lively { animation: ui-breathe 1.6s ease-in-out infinite; }
+.st-btn.lively:active { animation: none; }
+.st-btn.purple { filter: hue-rotate(245deg) saturate(0.9) drop-shadow(0 5px 5px rgba(0,0,0,0.35)); }
+.st-note { box-sizing: border-box; max-width: 100%; padding: 10px 34px 13px; border-radius: 22px; border: 5px solid #2e1a10;
+  background: linear-gradient(180deg, #8f5c3b 0%, #76472c 55%, #61391f 100%);
+  box-shadow: inset 0 0 0 3px rgba(255,214,170,0.2), inset 0 4px 0 rgba(255,230,200,0.22), 0 6px 0 rgba(30,15,8,0.45); }
+.st-note > div { text-shadow: 0 2px 0 rgba(0,0,0,0.45); white-space: pre-line; }
+.st-dash { height: 0; border-bottom: 5px dashed rgba(110,75,50,0.7); margin: 2px 0; }
+.st-pill { box-sizing: border-box; border-radius: 40px; border: 3px solid #c9a587; background: rgba(214,180,150,0.22); padding: 8px 20px 10px; }
+@media (prefers-reduced-motion: reduce) { .st-btn.lively { animation: none; } }
+`;
+let stCss = false;
+function ensureStCss(): void {
+  if (stCss || typeof document === "undefined") return;
+  stCss = true;
+  const st = document.createElement("style");
+  st.textContent = ST_CSS;
+  document.head.appendChild(st);
+}
+
+/** 손그림 버튼 (3조각 배경). kind = 파랑(광고) · 주황(다음/다시) · 갈색(지도로) */
+function stButton(kind: "blue" | "orange" | "brown", text: string, size = 50): Ui.Button {
+  const b = document.createElement("button") as Ui.Button;
+  b.className = `st-btn ${kind}`;
+  b.textContent = text;
+  b.setColor = () => undefined;
+  const m = ST_BTN[kind];
+  const H = Math.round(m.h * ST_K);
+  const lw = (m.l * H) / m.h;
+  const rw = (m.r * H) / m.h;
+  Object.assign(b.style, {
+    height: `${H}px`,
+    minWidth: `${Math.ceil(lw + rw + 20)}px`,
+    fontSize: `${size}px`,
+    backgroundImage: `${ST_ART(kind + "_l")}, ${ST_ART(kind + "_r")}, ${ST_ART(kind + "_m")}`,
+    backgroundPosition: `left top, right top, ${Math.floor(lw - 1)}px top`,
+    backgroundSize: `auto 100%, auto 100%, calc(100% - ${Math.floor(lw + rw - 2)}px) 100%`,
+  });
+  return b;
+}
+
+const STAR_IMG: HTMLImageElement | null = (() => {
+  if (typeof Image === "undefined") return null;
+  const im = new Image();
+  im.src = "assets/art/ui/st_star.webp";
+  return im;
+})();
+
+/** 가운데 칸(안내 칩 · 메뉴 그림)이 넘치면: 칩 글자를 줄이고, 그래도 넘치면 메뉴 그림을 뺀다 (가게 마지막 스테이지는 칩이 3개) */
+function fitMid(mid: HTMLElement): void {
+  const fit = (): void => {
+    if (!mid.isConnected) return;
+    const over = (): boolean => mid.scrollHeight > mid.clientHeight + 1;
+    let size = 31;
+    while (over() && size > 23) {
+      size -= 2;
+      mid.style.gap = `${Math.max(6, size - 19)}px`;
+      for (const n of Array.from(mid.querySelectorAll<HTMLElement>(".st-note"))) {
+        n.style.padding = `${Math.round(size * 0.25)}px 28px ${Math.round(size * 0.33)}px`;
+        const t = n.firstElementChild as HTMLElement | null;
+        if (t !== null) t.style.fontSize = `${size}px`;
+      }
+    }
+    if (over()) for (const c of Array.from(mid.querySelectorAll<HTMLElement>("canvas"))) c.parentElement === mid ? c.remove() : c.parentElement?.remove();
+  };
+  requestAnimationFrame(() => requestAnimationFrame(fit));
+}
+
+/** 손그림 금색 별 줄 (예시 그림처럼 한 줄로 같은 크기). 받은 별은 하나씩 톡 튀어나오고, 못 받은 별은 회색 */
+function artStars(stars: number, w = 600, h = 132, cell = 117, pop = true): CanvasWidget {
+  const wd = new CanvasWidget(w, h, (g, t) => {
+    const img = STAR_IMG !== null && STAR_IMG.complete && STAR_IMG.naturalWidth > 0 ? STAR_IMG : null;
+    const ctx = g.ctx;
+    for (let i = 0; i < D.MAX_STARS; i++) {
+      const on = i < stars;
+      let k = 1.0;
+      let shown = on;
+      if (pop && on) {
+        const tt = t - 0.35 - i * 0.25;
+        if (tt < 0) shown = false;
+        else if (tt < 0.3) k = 1.0 + Math.sin((tt / 0.3) * Math.PI) * 0.45;
+      }
+      const cx = w * 0.5 + (i - (D.MAX_STARS - 1) * 0.5) * cell;
+      const cy = h * 0.5;
+      if (img === null) {
+        FoodArt.gameStar(g, v(cx, cy), cell * 0.4 * k, shown);
+        continue;
+      }
+      const sw = cell * 0.97 * k;
+      const sh = (sw * img.height) / img.width;
+      ctx.save();
+      if (!shown) {
+        ctx.filter = "grayscale(1) brightness(0.62)";
+        ctx.globalAlpha = 0.9;
+      }
+      ctx.drawImage(img, cx - sw * 0.5, cy - sh * 0.5, sw, sh);
+      ctx.restore();
+    }
+  });
+  if (pop) wd.animated = true;
+  wd.el.style.alignSelf = "center";
+  return wd;
+}
 
 
 /** 정산 배경: 영업 끝에 내려온 줄무늬 천막이 그대로 닫혀 있고, 가운데가 등불처럼 따뜻하게 밝다 */
@@ -27,9 +159,23 @@ class ClosedTarp extends Node2D {
   draw(g: Gfx): void {
     const w = this.size.x;
     const h = this.size.y;
+    const ctx = g.ctx;
+    // 2026-11-22 사용자 그림 (영업 끝에 내려온 줄무늬 천막과 같은 그림) — 글씨가 잘 보이게 살짝 어둡게 + 가운데 등불 빛
+    const img = ArtAssets.tarpImage();
+    if (img !== null) {
+      ArtAssets.drawCover(ctx, img, 0, 0, w, h);
+      ctx.fillStyle = "rgba(24, 10, 5, 0.32)";
+      ctx.fillRect(0, 0, w, h);
+      const vg = ctx.createRadialGradient(w * 0.5, h * 0.45, h * 0.15, w * 0.5, h * 0.5, w * 0.62);
+      vg.addColorStop(0, "rgba(255,190,90,0.10)");
+      vg.addColorStop(0.6, "rgba(20,8,4,0.32)");
+      vg.addColorStop(1, "rgba(10,4,2,0.7)");
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, w, h);
+      return;
+    }
     const stripe = 90.0;
     for (let i = 0; i * stripe < w; i++) g.rect(new R(i * stripe, 0, stripe, h), (i % 2 === 0 ? TARP_RED : TARP_CREAM).darkened(0.42));
-    const ctx = g.ctx;
     // 주름 그림자
     for (let i = 0; i * stripe < w; i++) {
       const gr = ctx.createLinearGradient(i * stripe, 0, (i + 1) * stripe, 0);
@@ -48,14 +194,14 @@ class ClosedTarp extends Node2D {
   }
 }
 
-/** 영수증 한 줄: 이름 · 점선 · 금액 */
+/** 영수증 한 줄: 이름 · 점선 · 금액 (이름 글자 크기 = size, 금액은 size + 2) */
 function receiptRow(left: string, right: string, size: number, color: Color, rightColor: Color): HTMLDivElement {
   const h = Ui.hbox(12);
   h.style.alignItems = "baseline";
   const l = Ui.label(left, size, color, "left");
   const dots = Ui.div("dots");
   dots.style.flex = "1 1 auto";
-  h.append(l, dots, Ui.heading(right, size, rightColor, null, "right"));
+  h.append(l, dots, Ui.heading(right, size + 2, rightColor, null, "right"));
   return h;
 }
 
@@ -92,43 +238,77 @@ export class SettlementScene extends Scene {
     return this.r.passed;
   }
 
+  /** 영수증 종이 (그림) + 리본 제목 → 줄을 넣을 세로 상자. 자리는 잘라 낸 그림 px (st_card 758×600, 예시 그림 (41, 168)) */
+  private receiptCard(root: HTMLElement, title: string): HTMLDivElement {
+    const card = Ui.div("st-card panel pop");
+    Object.assign(card.style, { left: SU(41), top: SU(168), width: SU(758), height: SU(600), backgroundImage: ST_ART("card"), padding: "0", border: "0", boxShadow: "none" });
+    card.style.background = `${ST_ART("card")} center / 100% 100% no-repeat`;
+    root.appendChild(card);
+    const t = Ui.heading(title, 50, Ui.CREAM, Ui.INK);
+    Object.assign(t.style, { position: "absolute", left: SU(221), top: SU(16), width: SU(344), height: SU(74), display: "flex", alignItems: "center", justifyContent: "center", whiteSpace: "nowrap" });
+    card.appendChild(t);
+    const rc = Ui.div("st-rc");
+    Object.assign(rc.style, { left: SU(46), top: SU(112), width: SU(670), height: SU(466) });
+    card.appendChild(rc);
+    return rc;
+  }
+
+  /** 오른쪽 세로 줄: 위(제목·별) · 가운데(안내 칩·메뉴 그림, 남는 자리) · 아래(버튼) */
+  private sideColumn(root: HTMLElement): { top: HTMLDivElement; mid: HTMLDivElement } {
+    const side = Ui.div("st-side");
+    Object.assign(side.style, { left: SU(812), top: SU(92), width: SU(828), height: SU(780) });
+    root.appendChild(side);
+    const top = Ui.div();
+    Object.assign(top.style, { display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" });
+    side.appendChild(top);
+    const mid = Ui.div("st-mid");
+    side.appendChild(mid);
+    this.buttons = Ui.div("st-btns");
+    side.appendChild(this.buttons);
+    return { top, mid };
+  }
+
+  /** "할당량 달성!" 같은 큰 제목 + 양옆 반짝 선 (예시 그림) */
+  private titleWithBursts(el: HTMLElement): HTMLElement {
+    const row = Ui.hbox(10);
+    row.style.alignItems = "center";
+    const burst = (n: string, w: number, h: number): HTMLDivElement => {
+      const b = Ui.div();
+      Object.assign(b.style, { width: SU(w), height: SU(h), background: `${ST_ART(n)} center / 100% 100% no-repeat`, flex: "0 0 auto" });
+      return b;
+    };
+    row.append(burst("burst_l", 84, 97), el, burst("burst_r", 90, 96));
+    return row;
+  }
+
   /** 가로 화면: 왼쪽 영수증(금액), 오른쪽 결과·별점·버튼 */
   private build(): void {
     const r = this.r;
+    ensureStCss();
+    const root = Ui.div("st");
+    root.style.left = `${(this.vw - 1920) * 0.5}px`;
+    this.ui.appendChild(root);
     if (r.event) {
-      this.buildEvent();
+      this.buildEvent(root);
       return;
     }
-    const m = Ui.screenMargin(this.ui, 84, 50, 80);
-    const cols = Ui.hbox(56);
-    cols.style.alignItems = "center";
-    m.appendChild(cols);
-
-    const receipt = Ui.popPanel(Ui.PAPER, 22, 40);
-    receipt.style.width = "800px";
-    receipt.style.flex = "0 0 auto";
-    cols.appendChild(receipt);
     const shop = D.shopDef(r.shop ?? "pocha");
-    const title = this.endless() ? "무한 영업 결과" : `${D.levelName(r.level)} 정산`;
-    receipt.appendChild(Ui.ribbon(title, this.endless() ? Ui.AD : Ui.ACCENT, 46));
-    const rc = Ui.vbox(12);
-    receipt.appendChild(rc);
-    rc.appendChild(Ui.label(`— ${shop.name} 영수증 —`, 27, Ui.MUTED));
-    rc.appendChild(receiptRow("판매", D.formatWon(r.sales), 34, Ui.INK, Ui.INK));
-    rc.appendChild(receiptRow("팁", "+" + D.formatWon(r.tips), 34, Ui.INK, Ui.GOOD));
-    if (r.waste > 0) rc.appendChild(receiptRow("폐기 손실", "-" + D.formatWon(r.waste), 34, Ui.INK, Ui.BAD));
-    rc.appendChild(Ui.divider());
+    const rc = this.receiptCard(root, this.endless() ? "무한 영업 결과" : `${D.levelName(r.level)} 정산`);
+    rc.appendChild(Ui.label(`— ${shop.name} 영수증 —`, 30, Ui.MUTED));
+    rc.appendChild(receiptRow("판매", D.formatWon(r.sales), 38, Ui.INK, Ui.INK));
+    rc.appendChild(receiptRow("팁", "+" + D.formatWon(r.tips), 38, Ui.INK, Ui.GOOD));
+    if (r.waste > 0) rc.appendChild(receiptRow("폐기 손실", "-" + D.formatWon(r.waste), 38, Ui.INK, Ui.BAD));
+    rc.appendChild(Ui.div("st-dash"));
     const totalRow = Ui.hbox(12);
     totalRow.style.alignItems = "center";
-    const tl = Ui.heading("오늘 매출", 40, Ui.INK, null, "left");
+    const tl = Ui.heading("오늘 매출", 50, Ui.INK, null, "left");
     tl.style.flex = "1 1 auto";
-    this.totalLabel = Ui.heading("", 50, Ui.ACCENT, null, "right");
-    totalRow.append(tl, Ui.icon(Ui.ICON.coin, 52), this.totalLabel);
+    this.totalLabel = Ui.heading("", 60, Ui.ACCENT, null, "right");
+    totalRow.append(tl, Ui.icon(Ui.ICON.coin, 60), this.totalLabel);
     rc.appendChild(totalRow);
     this.refreshTotal();
-    if (this.endless()) rc.appendChild(receiptRow("버틴 시간", D.formatTime(r.elapsed), 30, Ui.MUTED, Ui.MUTED));
-    else rc.appendChild(receiptRow("할당량", D.formatWon(r.target), 30, Ui.MUTED, Ui.MUTED));
-    const stat = Ui.inset(12);
+    if (this.endless()) rc.appendChild(receiptRow("버틴 시간", D.formatTime(r.elapsed), 34, Ui.MUTED, Ui.MUTED));
+    else rc.appendChild(receiptRow("할당량", D.formatWon(r.target), 34, Ui.MUTED, Ui.MUTED));
     if (r.rating_start !== undefined && r.rating_end !== undefined) {
       const d = r.rating_end - r.rating_start;
       const names: Record<string, string> = { good: "맛있어요", cheap: "가성비 최고", pricey: "비싸요", slow: "너무 늦어요", bad: "별로예요" };
@@ -137,38 +317,36 @@ export class SettlementScene extends Scene {
         .sort((a, b) => b[1] - a[1])
         .map(([k, n]) => `${names[k] ?? k} ${n}`);
       rc.appendChild(
-        receiptRow(`가게 평점 ★${r.rating_start.toFixed(1)} → ★${r.rating_end.toFixed(1)}`, `${d >= 0 ? "▲" : "▼"} ${Math.abs(d).toFixed(1)}`, 28, Ui.INK, d >= 0 ? Ui.GOOD : Ui.BAD),
+        receiptRow(`가게 평점 ★${r.rating_start.toFixed(1)} → ★${r.rating_end.toFixed(1)}`, `${d >= 0 ? "▲" : "▼"} ${Math.abs(d).toFixed(1)}`, 32, Ui.INK, d >= 0 ? Ui.GOOD : Ui.BAD),
       );
-      if (tags.length > 0) rc.appendChild(Ui.label(`손님 평: ${tags.join(" · ")}`, 24, Ui.MUTED, "center", true));
+      if (tags.length > 0) rc.appendChild(Ui.label(`손님 평: ${tags.join(" · ")}`, 28, Ui.MUTED, "center", true));
     }
     const wasted = r.wasted ?? 0;
-    stat.appendChild(Ui.label(`완벽 서빙 ${D.roundHalfAway(r.perfect_ratio * 100.0)}% · 만족 ${r.happy}명 · 화난 손님 ${r.angry}명${wasted > 0 ? ` · 버린 음식 ${wasted}그릇` : ""}`, 27, Ui.INK, "center", true));
+    const stat = Ui.div("st-pill");
+    stat.appendChild(Ui.label(`완벽 서빙 ${D.roundHalfAway(r.perfect_ratio * 100.0)}% · 만족 ${r.happy}명 · 화난 손님 ${r.angry}명${wasted > 0 ? ` · 버린 음식 ${wasted}그릇` : ""}`, 28, Ui.INK, "center", true));
     rc.appendChild(stat);
 
-    const side = Ui.vbox(14);
-    side.style.flex = "1 1 auto";
-    side.style.alignItems = "center";
-    cols.appendChild(side);
+    const { top, mid } = this.sideColumn(root);
     if (this.endless()) {
       const best = GameState.bestEndlessFor(shop.id);
       const isBest = r.revenue >= best && best > 0;
-      side.appendChild(Ui.heading(isBest ? "최고 기록 갱신!" : `최고 기록 ${D.formatWon(best)}`, isBest ? 80 : 56, isBest ? Ui.GOLD : Ui.CREAM, rgb(0.12, 0.05, 0.02)));
+      top.appendChild(Ui.heading(isBest ? "최고 기록 갱신!" : `최고 기록 ${D.formatWon(best)}`, isBest ? 84 : 58, isBest ? Ui.GOLD : Ui.CREAM, rgb(0.12, 0.05, 0.02)));
     } else if (this.passed()) {
-      side.appendChild(Ui.logo("할당량 달성!", 92));
+      top.appendChild(this.titleWithBursts(Ui.logo("할당량 달성!", 96)));
     } else {
-      side.appendChild(Ui.heading("할당량 미달…", 84, rgb(1.0, 0.62, 0.55), rgb(0.3, 0.05, 0.03)));
+      top.appendChild(Ui.heading("할당량 미달…", 86, rgb(1.0, 0.62, 0.55), rgb(0.3, 0.05, 0.03)));
     }
-    side.appendChild(starRow(r.stars, 560, 120, 50, true).el);
+    top.appendChild(artStars(r.stars).el);
 
     // 재료가 바닥난 메뉴 알림 (다음 영업 전에 장보기)
     if (r.stock_left !== undefined) {
       const empty = Object.keys(r.stock_left).filter((m) => r.stock_left![m] <= 2 && D.menuUnlockLevel(m) <= Math.max(r.level, GameState.level));
-      if (empty.length > 0) side.appendChild(this.note(`재료가 거의 없어요: ${empty.map((m) => `${D.menuName(m)} ${r.stock_left![m]}인분`).join(", ")}\n지도의 '장보기'에서 채워 두세요`, rgb(1.0, 0.7, 0.55)));
+      if (empty.length > 0) mid.appendChild(this.note(`재료가 거의 없어요: ${empty.map((m) => `${D.menuName(m)} ${r.stock_left![m]}인분`).join(", ")}\n지도의 '장보기'에서 채워 두세요`, Ui.CREAM));
     }
     // 외상(지갑 마이너스)은 오늘 번 돈에서 갚는다
     if (GameState.wallet < 0) {
       const left = -(GameState.wallet + Math.max(0, r.revenue));
-      side.appendChild(this.note(left > 0 ? `외상이 아직 ${D.formatWon(left)} 남았어요` : `재료 외상 ${D.formatWon(-GameState.wallet)}을 오늘 번 돈으로 갚았어요`, rgb(1.0, 0.8, 0.6)));
+      mid.appendChild(this.note(left > 0 ? `외상이 아직 ${D.formatWon(left)} 남았어요` : `재료 외상 ${D.formatWon(-GameState.wallet)}을 오늘 번 돈으로 갚았어요`, rgb(1.0, 0.86, 0.7)));
     }
     const regulars = r.regulars ?? [];
     if (regulars.length > 0) {
@@ -177,7 +355,7 @@ export class SettlementScene extends Scene {
         const n = D.regularDef(id)?.name ?? "";
         if (n !== "" && !names.includes(n)) names.push(n);
       }
-      side.appendChild(this.note("다녀간 단골: " + names.join(", "), rgb(1.0, 0.82, 0.6)));
+      mid.appendChild(this.note("다녀간 단골: " + names.join(", "), rgb(1.0, 0.88, 0.66)));
     }
 
     if (!this.endless() && this.passed() && r.level < D.TOTAL_LEVELS) {
@@ -185,85 +363,64 @@ export class SettlementScene extends Scene {
       const nextShop = D.shopForLevel(nextLv);
       if (nextShop.id !== shop.id) {
         if (GameState.shopOpened(nextShop.id)) {
-          side.appendChild(this.note(`${shop.name} 마지막 스테이지 클리어!`, rgb(1.0, 0.85, 0.5)));
+          mid.appendChild(this.note(`${shop.name} 마지막 스테이지 클리어!`, rgb(1.0, 0.88, 0.55)));
         } else {
-          side.appendChild(
-            this.note(`${shop.name} 마지막 스테이지 클리어!\n무한 영업으로 돈을 모아 새 가게를 열어요\n다음 가게: ${nextShop.name} · ${D.formatWon(D.shopOpenCost(nextShop.id))}`, rgb(1.0, 0.85, 0.5)),
+          mid.appendChild(
+            this.note(`${shop.name} 마지막 스테이지 클리어!\n무한 영업으로 돈을 모아 새 가게를 열어요\n다음 가게: ${nextShop.name} · ${D.formatWon(D.shopOpenCost(nextShop.id))}`, rgb(1.0, 0.88, 0.55)),
           );
         }
         // 가게 사이 길에 미식가 이벤트가 열림 (한 번만)
         if (D.eventFor(shop.id) !== null && !GameState.eventPlayed(shop.id)) {
-          side.appendChild(this.note("가게 사이 길에 까다로운 미식가가 찾아왔어요!\n지도에서 딱 한 번 도전할 수 있어요", rgb(0.86, 0.72, 1.0)));
+          mid.appendChild(this.note("가게 사이 길에 까다로운 미식가가 찾아왔어요!\n지도에서 딱 한 번 도전할 수 있어요", rgb(0.9, 0.78, 1.0)));
         }
       } else {
         const unlocks: string[] = [];
-        for (const mid of D.menusUnlockedOn(nextLv)) unlocks.push(D.menuName(mid));
+        for (const mid2 of D.menusUnlockedOn(nextLv)) unlocks.push(D.menuName(mid2));
         for (const cid of D.customersUnlockedOn(nextLv)) unlocks.push(D.CUSTOMERS[cid].name);
-        if (unlocks.length > 0) side.appendChild(this.note(`${D.levelName(nextLv)} 새로 등장: ${unlocks.join(", ")}`, Ui.CREAM));
-        this.addMenuPics(side, D.menusUnlockedOn(nextLv));
+        if (unlocks.length > 0) mid.appendChild(this.note(`${D.levelName(nextLv)} 새로 등장: ${unlocks.join(", ")}`, Ui.CREAM));
+        this.addMenuPics(mid, D.menusUnlockedOn(nextLv));
       }
     }
-
-    side.appendChild(Ui.spacer(10));
-    this.buttons = Ui.vbox(14);
-    this.buttons.style.alignSelf = "stretch";
-    side.appendChild(this.buttons);
     this.buildButtons();
+    fitMid(mid);
   }
 
   /** 미식가 이벤트 정산: 왼쪽 영수증(요리 값), 오른쪽 미식가 얼굴·별·한줄평 → "다음 이야기" (신문 → 손님이 몰림 → 매출 상승) */
-  private buildEvent(): void {
+  private buildEvent(root: HTMLElement): void {
     const r = this.r;
     const gr = r.gourmet ?? { grade: 0, satisfaction: 0, reward: 0, perfect: 0, cooked: 0, bad: 0, missed: 0, total: 0 };
-    const m = Ui.screenMargin(this.ui, 84, 50, 80);
-    const cols = Ui.hbox(56);
-    cols.style.alignItems = "center";
-    m.appendChild(cols);
-
-    const receipt = Ui.popPanel(Ui.PAPER, 22, 40);
-    receipt.style.width = "800px";
-    receipt.style.flex = "0 0 auto";
-    cols.appendChild(receipt);
     const shop = D.shopDef(r.shop ?? "pocha");
-    receipt.appendChild(Ui.ribbon("미식가의 평가", Ui.EVENT, 46));
-    const rc = Ui.vbox(12);
-    receipt.appendChild(rc);
-    rc.appendChild(Ui.label(`— ${shop.name} · 미식가 방문 —`, 27, Ui.MUTED));
-    rc.appendChild(receiptRow("요리 값", D.formatWon(r.sales), 34, Ui.INK, Ui.INK));
-    rc.appendChild(receiptRow("팁", "+" + D.formatWon(r.tips), 34, Ui.INK, Ui.GOOD));
-    if (r.waste > 0) rc.appendChild(receiptRow("폐기 손실", "-" + D.formatWon(r.waste), 34, Ui.INK, Ui.BAD));
-    rc.appendChild(Ui.divider());
+    const rc = this.receiptCard(root, "미식가의 평가");
+    rc.appendChild(Ui.label(`— ${shop.name} · 미식가 방문 —`, 30, Ui.MUTED));
+    rc.appendChild(receiptRow("요리 값", D.formatWon(r.sales), 38, Ui.INK, Ui.INK));
+    rc.appendChild(receiptRow("팁", "+" + D.formatWon(r.tips), 38, Ui.INK, Ui.GOOD));
+    if (r.waste > 0) rc.appendChild(receiptRow("폐기 손실", "-" + D.formatWon(r.waste), 38, Ui.INK, Ui.BAD));
+    rc.appendChild(Ui.div("st-dash"));
     const totalRow = Ui.hbox(12);
     totalRow.style.alignItems = "center";
-    const tl = Ui.heading("받는 돈", 40, Ui.INK, null, "left");
+    const tl = Ui.heading("받는 돈", 50, Ui.INK, null, "left");
     tl.style.flex = "1 1 auto";
-    this.totalLabel = Ui.heading(D.formatWon(Math.max(0, r.revenue)), 50, Ui.ACCENT, null, "right");
-    totalRow.append(tl, Ui.icon(Ui.ICON.coin, 52), this.totalLabel);
+    this.totalLabel = Ui.heading(D.formatWon(Math.max(0, r.revenue)), 60, Ui.ACCENT, null, "right");
+    totalRow.append(tl, Ui.icon(Ui.ICON.coin, 60), this.totalLabel);
     rc.appendChild(totalRow);
-    const stat = Ui.inset(12);
+    const stat = Ui.div("st-pill");
     stat.appendChild(
-      Ui.label(`요리 ${gr.total}개 · 완벽 ${gr.perfect} · 익음 ${gr.cooked} · 탐·덜 익음 ${gr.bad} · 놓침 ${gr.missed}\n만족도 ${D.roundHalfAway(gr.satisfaction * 100)}%`, 27, Ui.INK, "center", true),
+      Ui.label(`요리 ${gr.total}개 · 완벽 ${gr.perfect} · 익음 ${gr.cooked} · 탐·덜 익음 ${gr.bad} · 놓침 ${gr.missed}\n만족도 ${D.roundHalfAway(gr.satisfaction * 100)}%`, 28, Ui.INK, "center", true),
     );
     rc.appendChild(stat);
 
-    const side = Ui.vbox(14);
-    side.style.flex = "1 1 auto";
-    side.style.alignItems = "center";
-    cols.appendChild(side);
-    const face = gourmetPortrait(shop.id, 210);
-    side.appendChild(face.el);
-    side.appendChild(Ui.heading(D.GOURMET_VERDICTS[gr.grade] || "다음 기회는 없네…", gr.grade >= 4 ? 80 : 64, gr.grade >= 4 ? Ui.GOLD : Ui.CREAM, rgb(0.12, 0.05, 0.02)));
-    side.appendChild(starRow(gr.grade, 520, 110, 46, true).el);
-    side.appendChild(this.note(`"${D.gourmetReview(D.eventFor(shop.id)?.critic ?? "", gr.grade)}"\n— ${D.criticName(D.eventFor(shop.id)?.critic ?? "")}`, rgb(1.0, 0.86, 0.66)));
-    side.appendChild(Ui.spacer(6));
-    this.buttons = Ui.vbox(14);
-    this.buttons.style.alignSelf = "stretch";
-    side.appendChild(this.buttons);
+    const { top, mid } = this.sideColumn(root);
+    const face = gourmetPortrait(shop.id, 190);
+    top.appendChild(face.el);
+    top.appendChild(Ui.heading(D.GOURMET_VERDICTS[gr.grade] || "다음 기회는 없네…", gr.grade >= 4 ? 78 : 62, gr.grade >= 4 ? Ui.GOLD : Ui.CREAM, rgb(0.12, 0.05, 0.02)));
+    top.appendChild(artStars(gr.grade, 600, 124, 110).el);
+    mid.appendChild(this.note(`"${D.gourmetReview(D.eventFor(shop.id)?.critic ?? "", gr.grade)}"\n— ${D.criticName(D.eventFor(shop.id)?.critic ?? "")}`, rgb(1.0, 0.88, 0.7)));
     if (gr.grade <= 0) {
-      Ui.lively(this.addButton("지도로", Ui.ACCENT, "map"));
+      Ui.lively(this.addButton("지도로", "orange", "map"));
       return;
     }
-    const next = Ui.button("", Ui.EVENT, 42, 116);
+    const next = stButton("orange", "");
+    next.classList.add("purple");
     Ui.withIcon(next, Ui.ICON.play, "다음 이야기");
     Ui.lively(next);
     Ui.onPress(next, () => this.fameStory(0));
@@ -473,11 +630,10 @@ export class SettlementScene extends Scene {
     return widget.el;
   }
 
-  /** 오른쪽 안내 한 줄 (어두운 칩 위 글자) */
+  /** 오른쪽 안내 한 줄 (예시 그림의 나무 칩 위 글자) */
   private note(text: string, color: Color): HTMLDivElement {
-    const c = Ui.chip(22);
-    c.style.padding = "8px 26px 10px";
-    c.appendChild(Ui.label(text, 29, color, "center", true));
+    const c = Ui.div("st-note");
+    c.appendChild(Ui.label(text, 31, color, "center", true));
     return c;
   }
 
@@ -493,49 +649,49 @@ export class SettlementScene extends Scene {
   private buildButtons(): void {
     const r = this.r;
     if (r.revenue > 0 && (this.passed() || this.endless())) {
-      const db = Ui.button("", Ui.AD, 40, 112);
+      const db = stButton("blue", "", 48);
       Ui.withIcon(db, Ui.ICON.ad, "광고 보고 매출 2배 받기");
       Ui.onPress(db, () => this.onDouble());
       this.buttons.appendChild(db);
       this.doubleBtn = db;
     }
     if (this.endless()) {
-      this.addButton("지도로", Ui.ACCENT, "map");
+      this.addButton("지도로", "orange", "map");
       return;
     }
     const lv = r.level;
     if (this.passed()) {
       const sameShop = lv < D.TOTAL_LEVELS && D.shopIndexForLevel(lv + 1) === D.shopIndexForLevel(lv);
       if (sameShop) {
-        const row = Ui.hbox(20);
+        const row = Ui.div("st-row");
         this.buttons.appendChild(row);
-        this.addButton("지도로", Ui.SECONDARY, "map", row).style.minWidth = "260px";
-        const nx = this.addButton("", Ui.ACCENT, "next", row);
+        this.addButton("지도로", "brown", "map", row).style.width = SU(252);
+        const nx = this.addButton("", "orange", "next", row);
         Ui.withIcon(nx, Ui.ICON.play, "다음 스테이지");
         Ui.lively(nx);
         nx.style.flex = "1 1 auto";
       } else {
-        Ui.lively(this.addButton("다음으로", Ui.ACCENT, "map"));
+        Ui.lively(this.addButton("다음으로", "orange", "map"));
       }
       return;
     }
-    const passBtn = Ui.button("", Ui.AD, 38, 112);
+    const passBtn = stButton("blue", "", 44);
     Ui.withIcon(passBtn, Ui.ICON.ad, "광고 보고 이번 스테이지 통과 (1회)");
     Ui.onPress(passBtn, () => {
       passBtn.disabled = true;
       showRewarded("pass_level", () => this.finish(true, "map"));
     });
     this.buttons.appendChild(passBtn);
-    const row2 = Ui.hbox(20);
+    const row2 = Ui.div("st-row");
     this.buttons.appendChild(row2);
-    this.addButton("지도로", Ui.SECONDARY, "map", row2).style.minWidth = "260px";
-    const again = this.addButton("다시 도전", Ui.ACCENT, "retry", row2);
+    this.addButton("지도로", "brown", "map", row2).style.width = SU(252);
+    const again = this.addButton("다시 도전", "orange", "retry", row2);
     Ui.lively(again);
     again.style.flex = "1 1 auto";
   }
 
-  private addButton(text: string, color: Color, route: string, parent: HTMLElement | null = null): Ui.Button {
-    const b = Ui.button(text, color, 42, 116);
+  private addButton(text: string, kind: "blue" | "orange" | "brown", route: string, parent: HTMLElement | null = null): Ui.Button {
+    const b = stButton(kind, text);
     Ui.onPress(b, () => this.finish(false, route));
     (parent ?? this.buttons).appendChild(b);
     return b;

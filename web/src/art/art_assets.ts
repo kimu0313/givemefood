@@ -113,35 +113,39 @@ export const CUSTOMER_SPRITES: Record<string, string[]> = {
 // 잘라 낸 그림(380×640)에서 잰 [얼굴 가운데 x, 눈 높이 y, 얼굴 크기] → 얼굴이 모두 SPRITE_HEAD 가 되게 키우고 줄여서,
 // 눈은 SPRITE_EYE_Y + SPRITE_DY(키 차이) 높이에, 얼굴 가운데는 손님 자리 가운데에. 얼굴이 작게 그려진 그림은 몸까지 같이 커짐.
 // 새 그림을 넣으면 얼굴을 확대 격자로 재서 여기에 (모두 같은 화면 배율로 나란히 놓고 확인)
+// 2026-11-22 사용자 "손님들 머리 크기 다 같게": 세 번째 값 = 얼굴 크기(√(볼 폭 × 눈~턱), 2026-11-18)와 머리 전체 크기(머리카락·모자 포함,
+// 맨 위 ~ 턱 × 눈 위 가장 넓은 폭, 그림에서 자동으로 잼, 얼굴 단위로 환산)를 반씩 섞은 값 √(얼굴 × 머리전체). 얼굴만 맞추면 짧은 머리·모자 손님은
+// 머리가 작아 보이고 머리숱 많은 손님은 커 보여서 (머리 전체 130~180px), 섞어서 얼굴·머리 전체 둘 다 ±8% 안쪽. 주석의 '얼굴 n' = 예전 얼굴 값.
+// 새 그림을 넣으면 얼굴을 재고, 머리 전체는 scratchpad 의 head_mass 방식(맨 위 불투명 줄 ~ 눈+0.92×얼굴, 눈 위 가장 넓은 폭)으로 재서 섞는다.
 export const SPRITE_HEADS: Record<string, [number, number, number]> = {
-  guest_taxi: [188, 95, 100.7], // W 104 × E 97.5 (고개를 들고 웃음)
-  guest_critic_kang: [199, 124, 91.9], // 97 × 87
-  guest_critic_seo: [161, 131, 103.1], // 115 × 92.5
-  guest_critic_han: [158, 128, 101.4], // 105 × 98
-  guest_critic_hwang: [160, 122, 101.5], // 117 × 88 (고개 기울임)
-  guest_critic_baek: [140, 127, 107.9], // 113 × 103
-  guest_imo: [203, 196.7, 105.5], // 121 × 92
-  guest_punk: [232, 122.8, 95.3], // 102 × 89
-  guest_office: [176.5, 120, 81.3], // 87 × 76
-  guest_rider: [135, 95, 81.5], // 83 × 80
-  guest_granny: [207.5, 157, 110.5], // 113 × 108 (부푼 머리 뺌)
-  guest_chef: [240, 88, 101.5], // 117 × 88 (두건 뺌)
+  guest_taxi: [188, 95, 89.2], // 얼굴 100.7 · W 104 × E 97.5 (고개를 들고 웃음)
+  guest_critic_kang: [199, 124, 92.2], // 얼굴 91.9 · 97 × 87
+  guest_critic_seo: [161, 131, 103.1], // 얼굴 103.1 · 115 × 92.5
+  guest_critic_han: [158, 128, 99.2], // 얼굴 101.4 · 105 × 98
+  guest_critic_hwang: [160, 122, 96.2], // 얼굴 101.5 · 117 × 88 (고개 기울임)
+  guest_critic_baek: [140, 127, 104], // 얼굴 107.9 · 113 × 103
+  guest_imo: [203, 196.7, 110], // 얼굴 105.5 · 121 × 92
+  guest_punk: [232, 122.8, 91.4], // 얼굴 95.3 · 102 × 89
+  guest_office: [176.5, 120, 81.9], // 얼굴 81.3 · 87 × 76
+  guest_rider: [135, 95, 76.2], // 얼굴 81.5 · 83 × 80
+  guest_granny: [207.5, 157, 117.1], // 얼굴 110.5 · 113 × 108 (부푼 머리 뺌)
+  guest_chef: [240, 88, 92.3], // 얼굴 101.5 · 117 × 88 (두건 뺌)
   // 2026-11-18 sheet_d
-  guest_mustache: [189, 90, 103.0], // 110 × 96.5
-  guest_student: [186.8, 137, 95.5], // 102 × 89.5 (안경)
-  guest_barista: [185, 149.4, 113.6], // 114.7 × 112.6 (긴 얼굴, 머리카락 뺌)
-  guest_guard: [185, 104.7, 94.7], // 103 × 87 (모자 뺌)
-  guest_kid: [189.1, 174, 128.6], // 144 × 114.8 (귀 뺌)
+  guest_mustache: [189, 90, 93.6], // 얼굴 103.0 · 110 × 96.5
+  guest_student: [186.8, 137, 99.9], // 얼굴 95.5 · 102 × 89.5 (안경)
+  guest_barista: [185, 149.4, 112.5], // 얼굴 113.6 · 114.7 × 112.6 (긴 얼굴, 머리카락 뺌)
+  guest_guard: [185, 104.7, 85.1], // 얼굴 94.7 · 103 × 87 (모자 뺌)
+  guest_kid: [189.1, 174, 128.7], // 얼굴 128.6 · 144 × 114.8 (귀 뺌)
   // 2026-11-18 sheet_e (나란히 놓고 보니 두 여자아이 얼굴이 살짝 작아 보여 ~6% 키움)
-  guest_schoolgirl: [177, 174, 112], // 145 × 98 (눈 감고 웃음) → 119 를 112 로
-  guest_capboy: [186, 155, 130], // 170 × ~100 (고개 들고 입 벌림, 벌린 턱은 덜 셈)
-  guest_uniform: [197, 176, 104], // 140 × 77 (턱 괸 손 뺌, 고개 기울임)
-  guest_twintail: [196.5, 164, 110], // 161 × 85 (둥근 얼굴) → 117 을 110 으로
-  guest_longhair: [155, 140.6, 89], // ~95 × 84 (고개를 크게 기울임, 기울어 넓어진 폭은 덜 셈)
-  guest_jacket: [244.7, 120.6, 95], // 112 × 61 = 82.6 이지만 고개를 들어 턱이 짧게 보여서, 나란히 놓고 다른 얼굴에 맞춤
-  guest_worker: [175, 103, 97.6], // 112 × ~85 (크게 웃어 벌린 턱은 덜 셈)
-  guest_apron: [151, 132, 80.5], // ~90 × 72 (고개 기울임, 귀 뺌)
-  guest_mechanic: [168, 112, 76], // ~74 × 68 (고개를 들어 턱이 짧게 보여 나란히 놓고 맞춤)
+  guest_schoolgirl: [177, 174, 117.2], // 얼굴 112 · 145 × 98 (눈 감고 웃음) → 119 를 112 로
+  guest_capboy: [186, 155, 128.2], // 얼굴 130 · 170 × ~100 (고개 들고 입 벌림, 벌린 턱은 덜 셈)
+  guest_uniform: [197, 176, 109.8], // 얼굴 104 · 140 × 77 (턱 괸 손 뺌, 고개 기울임)
+  guest_twintail: [196.5, 164, 123.7], // 얼굴 110 · 161 × 85 (둥근 얼굴) → 117 을 110 으로
+  guest_longhair: [155, 140.6, 96.5], // 얼굴 89 · ~95 × 84 (고개를 크게 기울임, 기울어 넓어진 폭은 덜 셈)
+  guest_jacket: [244.7, 120.6, 96.9], // 얼굴 95 · 112 × 61 = 82.6 이지만 고개를 들어 턱이 짧게 보여서, 나란히 놓고 다른 얼굴에 맞춤
+  guest_worker: [175, 103, 91.5], // 얼굴 97.6 · 112 × ~85 (크게 웃어 벌린 턱은 덜 셈)
+  guest_apron: [151, 132, 84.5], // 얼굴 80.5 · ~90 × 72 (고개 기울임, 귀 뺌)
+  guest_mechanic: [168, 112, 74.2], // 얼굴 76 · ~74 × 68 (고개를 들어 턱이 짧게 보여 나란히 놓고 맞춤)
 };
 export const SPRITE_HEAD = 80.0; // 손님 노드 기준 얼굴 크기 √(폭 × 눈~턱) (2026-11-18 전 그림의 가운데값)
 /** 그림마다 크기 보정 (눈 높이 기준). 2026-11-18 얼굴 크기로 맞추면서 요리사 0.84 는 뺌 (얼굴 기준이면 원래 그 크기) */
@@ -189,13 +193,14 @@ export function texture(path: string): HTMLImageElement | null {
 
 /** 시작할 때 미리 받아 둠. onProgress(받은 수, 전체 수) */
 export function preload(onProgress: (done: number, total: number) => void = () => {}): Promise<void> {
-  const paths = [TITLE_IMAGE, `${ROOT}/${WORLD_FILE}`, ...COMIC_PRELOAD, ...FAME_PRELOAD] // 지도 배경 그림 (map_art.SHOW_WORLD_IMAGE)
+  const paths = [TITLE_IMAGE, `${ROOT}/${WORLD_FILE}`, `${ROOT}/${TARP_FILE}`, `${ROOT}/${POWDER_FILE}`, ...COMIC_PRELOAD, ...FAME_PRELOAD] // 지도 배경 그림 (map_art.SHOW_WORLD_IMAGE)
     .concat(Object.values(MAP_BUILDING_FILES).map((f) => `${ROOT}/map/${f}`))
     .concat(CUSTOMER_FILES.map((n) => `${ROOT}/customers/${n}.png`))
     .concat(BACKGROUND_FILES.map((n) => `${ROOT}/backgrounds/${n}.png`))
     .concat(Object.values(SHOP_ART).flatMap((a) => [`${ROOT}/${a.file}`, `${ROOT}/${a.front}`]))
     .concat(FOOD_FILES.map((n) => `${ROOT}/food/${n}.png`))
     .concat(ICON_FILES.map((n) => `${ROOT}/icons/${n}.png`))
+    .concat(["mk_bg", "mk_front", "mk_bubble", "mk_tab_on", "basket_back", "basket_front"].map((n) => `${ROOT}/ui/${n}.webp`)) // 재료 가게 그림 (ui/supply.ts)
     .concat(["tut_panel", "tut_tag", "tut_ok", "tut_skip"].map((n) => `${ROOT}/ui/${n}.webp`)) // 튜토리얼 말풍선 (CSS 그림, 처음 뜰 때 깜빡이지 않게)
     .concat(MAP_UI_FILES.map((n) => `${ROOT}/ui/map_${n}.webp`)); // 지도 UI 조각 (사용자 예시 그림, tools/map_ui_art.mjs)
   let done = 0;
@@ -219,6 +224,26 @@ export function preload(onProgress: (done: number, total: number) => void = () =
         }),
     ),
   ).then(() => undefined);
+}
+
+/** 마법의 가루 병 (2026-11-22 사용자 그림 "보라빛 마법 가루 유리병", art_src/powder_jar.png → tools/trim_webp.mjs → ui/powder.webp 320×413): 재료 가게 칸 · 영업 중 가루 통 */
+export const POWDER_FILE = "ui/powder.webp";
+export function powderImage(): Img | null {
+  return texture(`${ROOT}/${POWDER_FILE}`);
+}
+
+/** 영업 끝 셔터 · 정산 배경의 줄무늬 천막 그림 (2026-11-22 사용자 그림 "빈티지 적갈색·황갈색 줄무늬 배경", art_src/tarp_stripes.png → ui/tarp.webp 1678×937) */
+export const TARP_FILE = "ui/tarp.webp";
+export function tarpImage(): Img | null {
+  return texture(`${ROOT}/${TARP_FILE}`);
+}
+
+/** 그림으로 (x, y, w, h) 를 꽉 채움 (비율 유지, 넘치는 쪽은 가운데 기준으로 잘림) */
+export function drawCover(ctx: CanvasRenderingContext2D, img: Img, x: number, y: number, w: number, h: number): void {
+  const k = Math.max(w / img.width, h / img.height);
+  const dw = img.width * k;
+  const dh = img.height * k;
+  ctx.drawImage(img, x + (w - dw) * 0.5, y + (h - dh) * 0.5, dw, dh);
 }
 
 export function titleImage(): Img | null {

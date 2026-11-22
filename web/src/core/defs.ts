@@ -74,6 +74,9 @@ export const BURNT_COLOR = rgb(0.16, 0.11, 0.09);
 // 떡볶이 판·순대 솥 한 번에 만드는 그릇 수. 떡볶이 판은 "판 키우기" 업그레이드(화구 추가 자리)로 1그릇씩 늘어난다
 export const PAN_PORTIONS = 2; // 떡볶이 한 판 = 늘 2그릇 (2026-11-21 사용자 "2판을 최대로, 그쪽 업그레이드는 완벽 범위가 늘어나는 걸로" — 판 키우기 없앰)
 export const STEAMER_PORTIONS = 4;
+// 도마 옆 대기 줄 (2026-11-22 사용자 "야시장에서 닭강정 다 튀겨지면 꺼내야 하는데 안 눌러짐"): 도마에 한 그릇이 버무리는 중이어도
+// 다 익은 튀김기·솥 음식을 꺼낼 수 있게, 꺼낸 음식이 도마 옆에서 이만큼 기다린다 (도마 일이 끝나면 차례로 올라감). 꽉 차면 예전처럼 막힘.
+export const BOARD_QUEUE_MAX = 3;
 
 export interface StationSpot {
   kind: string;
@@ -296,10 +299,10 @@ export const MENUS: Record<string, MenuDef> = {
     ],
   },
   dakgangjeong: {
+    // 2026-11-22 사용자 "닭강정은 도마에 안 올라가도 돼, 다 튀겨지면 바로 줄 수 있어" — 버무리기(도마 3번) 없앰, 튀김기에서 바로 완성 칸으로
     name: "닭강정", label: "닭강정", price: 6000, station: "fryer",
-    board: { taps: 3, verb: "버무리기" },
     raw_color: rgb(0.97, 0.9, 0.76), cooked_color: rgb(0.86, 0.56, 0.22),
-    tip: "튀김기에서 6~9초에 건진 뒤, 도마를 3번 탭해서 양념에 버무려요.",
+    tip: "튀김기에서 6~9초에 건지면 바로 나가요.",
     steps: [
       { kind: "cook", label: "튀기는 중", ripe: 4.0, perfect_start: 6.0, perfect_end: 9.0, burns: true, tap: "take_out" },
     ],

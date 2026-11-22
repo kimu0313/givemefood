@@ -318,6 +318,7 @@ export const UI: [string, string, string, string][] = [
   // 미식가 스테이지 전 만화
   ["화면을 누르면 다음 컷", "Tap for the next panel", "画面を押すと次のコマ", "点击屏幕看下一格"],
   ["{0}{j} 아직 안 열었잖아요~ 가게를 열면 그때 재료를 줄게요!", "{0} isn't open yet~ Open the shop and I'll sell you its ingredients!", "{0}はまだ開いてないでしょ~ お店を開いたら材料をあげるね!", "{0}还没开张呢~ 开了店我再给你食材！"],
+  ["영업 중이라 지금은 {0} 재료만 팔아요~", "We're open right now, so it's only {0} ingredients for today~", "営業中だから今は{0}の材料だけ売ってるよ~", "正在营业，现在只卖{0}的食材哦~"],
   ["{0} 재료는 여기 있어요!", "Here are the {0} ingredients!", "{0}の材料はこっちだよ!", "{0}的食材在这儿！"],
   ["계산대", "Register", "レジ", "收银台"],
   ["어서 와요, 사장님! 첫 재료는 공짜로 담아 줄게요~", "Welcome, boss! Your first ingredients are on me~", "いらっしゃい、社長! 最初の材料はタダで詰めてあげる~", "欢迎，老板！第一批食材免费给你装~"],
@@ -445,4 +446,5 @@ export const UI: [string, string, string, string][] = [
   ["평점", "Rating", "評価", "评分"],
   ["아직 안 열었어요", "Not open yet", "まだ開いていません", "尚未开张"],
   ["평점 = 손님 평가 (5점 만점) · 무한 영업은 그 가게 마지막 스테이지를 깬 뒤 열려요", "Rating = guest reviews (out of 5) · Endless opens after a shop's last stage", "評価 = お客さんの評価 (5点満点) · エンドレスはそのお店の最後のステージをクリアすると開きます", "评分 = 顾客评价 (满分5分) · 通关该店最后一关后开放无限营业"],
+  ["대기 {0}", "Waiting {0}", "待ち {0}", "等待 {0}"],
 ];
