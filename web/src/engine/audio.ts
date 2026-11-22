@@ -5,6 +5,12 @@
 //   SFX: 튀김 지글지글, 보글보글, 칼질, 뒤집기, 그릇 달그락, 서빙, 동전, 완벽, 탐, 화남, 안 됨, 쓰레기통, 업그레이드, 버튼 …
 //   비(rain): 비 오는 골목 포장마차에서 계속 들리는 빗소리 (다음 곡으로 바뀌면 멈춤).
 // 브라우저는 사람이 한 번 누르기 전에는 소리를 못 내게 해서, 첫 클릭·키 입력 때 소리를 켜고 그때 곡을 시작한다.
+// 모바일 (2026-11-22 사용자 "모바일에서는 게임 소리랑 효과음이 안 들려"):
+//   - 손가락 pointerdown 은 브라우저가 '사용자 동작'으로 안 쳐서 그때 만든 AudioContext 가 잠긴 채 남음 →
+//     pointerup · touchend · click 등에서도 계속 열어 봄 (열릴 때까지 매번), 손가락 동작 안에서 아주 짧은 무음도 한 번 냄 (iOS 잠금 풀기).
+//   - 아이폰 무음 스위치를 켜면 Web Audio 가 안 들림 → navigator.audioSession.type = "playback" (iOS 17+),
+//     그보다 옛 iOS 는 무음 <audio> 를 되풀이 재생해 소리 세션을 '재생'으로 바꿈.
+//   - 앱을 내렸다 오면(전화·홈 화면) 소리가 'interrupted'/'suspended' 로 멈춤 → 화면이 보이면 다시 열고, 안 되면 다음 터치에 엶.
 // 소리 끄기는 저장 (localStorage "pocha_tycoon_sound" = "off"). 노드(테스트)에서는 아무것도 안 한다.
 
 const SOUND_KEY = "pocha_tycoon_sound";
@@ -125,9 +131,46 @@ SONGS.map = SONGS.title;
 
 // ---------------------------------------------------------------- 재생기
 
+/** 아이폰·아이패드 (iPadOS 는 Mac 처럼 보여서 터치 점 수로 가림) */
+function isIOS(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return /iPad|iPhone|iPod/.test(ua) || (ua.includes("Macintosh") && (navigator.maxTouchPoints ?? 0) > 1);
+}
+
+/** 0.5초 무음 WAV (8kHz 8비트 모노) — 옛 iOS 무음 스위치 우회용 <audio> */
+function silentWavUrl(): string {
+  const n = 4000;
+  const b = new Uint8Array(44 + n);
+  const dv = new DataView(b.buffer);
+  const str = (o: number, t: string): void => {
+    for (let i = 0; i < t.length; i++) b[o + i] = t.charCodeAt(i);
+  };
+  str(0, "RIFF");
+  dv.setUint32(4, 36 + n, true);
+  str(8, "WAVE");
+  str(12, "fmt ");
+  dv.setUint32(16, 16, true);
+  dv.setUint16(20, 1, true); // PCM
+  dv.setUint16(22, 1, true); // 모노
+  dv.setUint32(24, 8000, true);
+  dv.setUint32(28, 8000, true);
+  dv.setUint16(32, 1, true);
+  dv.setUint16(34, 8, true);
+  str(36, "data");
+  dv.setUint32(40, n, true);
+  b.fill(128, 44); // 8비트 무음 = 128
+  let bin = "";
+  for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]);
+  return "data:audio/wav;base64," + btoa(bin);
+}
+
+type AudioSessionNav = Navigator & { audioSession?: { type: string } };
+
 class AudioHub {
   muted = false;
   private ctx: AudioContext | null = null;
+  private silentEl: HTMLAudioElement | null = null; // 옛 iOS 무음 스위치 우회 (무음 되풀이)
   private master: GainNode | null = null;
   private bgmBus: GainNode | null = null;
   private sfxBus: GainNode | null = null;
@@ -154,17 +197,66 @@ class AudioHub {
     } catch {
       // 저장소를 못 쓰면 켠 채로
     }
-    const unlock = () => this.unlock();
-    window.addEventListener("pointerdown", unlock);
-    window.addEventListener("keydown", unlock);
+    // 소리 열기: 열릴 때까지 모든 누르기·떼기에서 시도 (모바일은 떼는 순간(touchend · pointerup · click)만 '사용자 동작'으로 침)
+    const unlock = (): void => this.unlock();
+    for (const ev of ["pointerdown", "pointerup", "touchstart", "touchend", "mousedown", "click", "keydown"]) {
+      window.addEventListener(ev, unlock, { capture: true, passive: true });
+    }
+    // 아이폰 무음 스위치를 켜도 게임 소리가 나게 (iOS 17+; 동작 없이도 미리 정할 수 있음)
+    this.iosPlaybackSession();
+    // 앱을 내리면 소리를 멈추고, 다시 보이면 이어서 (못 열면 다음 터치에서 unlock 이 엶)
+    document.addEventListener("visibilitychange", () => {
+      const c = this.ctx;
+      if (document.hidden) {
+        if (c !== null && c.state === "running") void c.suspend().catch(() => undefined);
+        this.silentEl?.pause();
+        return;
+      }
+      if (c !== null && c.state !== "running") void c.resume().catch(() => undefined);
+    });
+  }
+
+  /** 지금 소리 상태 (테스트용): "none" = 아직 안 만듦 / "running" / "suspended" / "interrupted" … */
+  state(): string {
+    return this.ctx === null ? "none" : this.ctx.state;
+  }
+
+  /** iOS: 소리 세션을 '재생'으로 (무음 스위치를 켜도 들림). 17 이상은 audioSession, 그 전은 무음 <audio> 되풀이 */
+  private iosPlaybackSession(): void {
+    if (!isIOS()) return;
+    const nav = navigator as AudioSessionNav;
+    if (nav.audioSession !== undefined) {
+      try {
+        if (nav.audioSession.type !== "playback") nav.audioSession.type = "playback";
+      } catch {
+        // 못 바꿔도 소리는 남 (무음 스위치만 영향)
+      }
+      return;
+    }
+    if (this.ctx === null || document.hidden) return; // 무음 <audio> 는 손가락 동작 안에서만 재생됨 → unlock 에서 부름
+    if (this.silentEl === null) {
+      const a = document.createElement("audio");
+      a.src = silentWavUrl();
+      a.loop = true;
+      a.preload = "auto";
+      a.setAttribute("playsinline", "");
+      a.setAttribute("x-webkit-airplay", "deny");
+      this.silentEl = a;
+    }
+    if (this.silentEl.paused) void this.silentEl.play().catch(() => undefined);
   }
 
   /** 첫 입력 때 소리 켜기 (그 전에 고른 곡을 이때 시작) */
   private unlock(): void {
-    if (typeof AudioContext === "undefined") return;
+    const AC = typeof window === "undefined" ? undefined : (window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext);
+    if (AC === undefined) return;
+    if (this.ctx !== null && this.ctx.state === "running") {
+      if (this.silentEl !== null && this.silentEl.paused && !document.hidden) this.iosPlaybackSession();
+      return; // 이미 열림
+    }
     if (this.ctx === null) {
       try {
-        this.ctx = new AudioContext();
+        this.ctx = new AC({ latencyHint: "interactive" });
       } catch {
         return;
       }
@@ -188,7 +280,20 @@ class AudioHub {
       const d = this.noiseBuf.getChannelData(0);
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     }
-    if (this.ctx.state === "suspended") void this.ctx.resume();
+    if (this.ctx.state !== "running" && !document.hidden) {
+      void this.ctx.resume().catch(() => undefined);
+      // iOS 는 손가락 동작 안에서 실제로 소리를 한 번 내야 열림 → 1칸짜리 무음
+      try {
+        const c = this.ctx;
+        const src = c.createBufferSource();
+        src.buffer = c.createBuffer(1, 1, c.sampleRate);
+        src.connect(c.destination);
+        src.start(0);
+      } catch {
+        // 무시
+      }
+    }
+    this.iosPlaybackSession();
     if (this.song !== null && this.timer === null && !this.bgmPaused) this.startSequencer();
     if (this.wantRain && this.rain === null) this.startRain();
   }
