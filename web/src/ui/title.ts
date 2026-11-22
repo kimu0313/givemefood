@@ -35,16 +35,17 @@ type Rect4 = [number, number, number, number];
  * tools/dialog_art.mjs → ui/dialog_newgame.webp). 본문 세 줄은 그림에서 지워 두고 게임이 쓴다 (기록이 그때그때 달라서).
  * 리본·버튼 글씨는 그림 그대로, 다른 언어면 같은 색 판으로 덮고 번역. 자리 = 그림 픽셀 [x0, y0, x1, y1]
  */
-const NEWGAME_W = 1486;
-const NEWGAME_H = 948;
+// 2026-11-22 사용자 새 그림 ("새로 시작 UI 이걸로 바꿔 줘", 투명 바탕 1565×1005 → 잘라 낸 1530×981). 예전 그림 자리는 git 기록 참고
+const NEWGAME_W = 1530;
+const NEWGAME_H = 981;
 const NEWGAME_SHOW = 1040; // 화면에서의 폭 (설계 px)
-const NEWGAME_BODY: Rect4 = [180, 212, 1306, 372]; // 본문 두 줄 (첫 밑줄 위)
-const NEWGAME_HINT: Rect4 = [330, 404, 1156, 466]; // 셋째 줄 (두 밑줄 사이)
+const NEWGAME_BODY: Rect4 = [200, 224, 1325, 386]; // 본문 두 줄 (첫 밑줄 위)
+const NEWGAME_HINT: Rect4 = [410, 416, 1115, 482]; // 셋째 줄 (두 밑줄 사이)
 const NEWGAME_PARTS: { id: "title" | "keep" | "fresh" | "cancel"; text: string; hit: Rect4 | null; label: Rect4; plank: string }[] = [
-  { id: "title", text: "새로 시작", hit: null, label: [530, 32, 960, 150], plank: "rgb(180, 74, 40)" },
-  { id: "keep", text: "이어하기", hit: [66, 528, 734, 708], label: [258, 568, 552, 654], plank: "rgb(122, 134, 76)" },
-  { id: "fresh", text: "처음부터", hit: [752, 528, 1422, 708], label: [952, 568, 1236, 654], plank: "rgb(210, 98, 56)" },
-  { id: "cancel", text: "취소", hit: [66, 748, 1416, 888], label: [664, 770, 820, 854], plank: "rgb(160, 110, 74)" },
+  { id: "title", text: "새로 시작", hit: null, label: [535, 34, 995, 150], plank: "rgb(239, 89, 44)" },
+  { id: "keep", text: "이어하기", hit: [70, 546, 748, 731], label: [245, 592, 590, 688], plank: "rgb(150, 145, 90)" },
+  { id: "fresh", text: "처음부터", hit: [770, 549, 1460, 733], label: [940, 592, 1295, 688], plank: "rgb(238, 90, 46)" },
+  { id: "cancel", text: "취소", hit: [70, 766, 1459, 906], label: [655, 792, 870, 878], plank: "rgb(180, 124, 87)" },
 ];
 
 /** 글자가 칸을 넘치면 넘치지 않을 때까지 글자 크기를 줄인다 (다른 언어는 문장이 길어서) */

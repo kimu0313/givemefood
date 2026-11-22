@@ -11,9 +11,11 @@ import fs from "node:fs";
 const SRC = "art_src/ui_newgame_dialog.png";
 const OUT = "public/assets/art/ui/dialog_newgame.webp";
 // 지울 본문 글씨 (원본 픽셀 [x0, y0, x1, y1]) — 밑줄 붓자국은 남김
+// 2026-11-22 사용자 새 그림 (흰 바탕, 1563×1006, "UI 이걸로 바꿔 줘"). 예전 그림(art_src/ui_newgame_dialog_v1.png, 어두운 장면 바탕)은
+// [[215, 232, 1360, 392], [405, 424, 1185, 484]]
 const ERASE = [
-  [215, 232, 1360, 392],
-  [405, 424, 1185, 484],
+  [228, 244, 1335, 386],
+  [452, 428, 1112, 486],
 ];
 
 const b64 = fs.readFileSync(SRC).toString("base64");
@@ -37,7 +39,16 @@ try {
       const d = id.data;
       const lum = (i) => (d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 3;
       const red = (i) => d[i * 4] > 90 && d[i * 4] - d[i * 4 + 1] > 50;
-      const isBg = (i) => lum(i) < 140 && !red(i);
+      // 바탕: 귀퉁이가 밝으면 흰 바탕 (거의 흰색·색 없음 — 양피지는 살짝 누래서 안 걸림), 어두우면 예전처럼 어두운 장면
+      const cornerLum = (lum(0) + lum(w - 1) + lum(N - w) + lum(N - 1)) / 4;
+      const white = cornerLum > 230;
+      // 투명 바탕 그림 (2026-11-22 사용자 세 번째 그림): 귀퉁이가 투명하면 알파로 바탕을 정함
+      const clear = d[3] < 16 && d[(w - 1) * 4 + 3] < 16 && d[(N - 1) * 4 + 3] < 16;
+      const isBg = clear
+        ? (i) => d[i * 4 + 3] < 128
+        : white
+        ? (i) => Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) >= 212 && Math.max(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) - Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) <= 9 // 흰 바탕 + 구운 회색 바둑판(226~235)도 바탕
+        : (i) => lum(i) < 140 && !red(i);
 
       // 1) 배경 채우기
       const bg = new Uint8Array(N);
@@ -158,10 +169,10 @@ try {
       // 5) 본문 글씨 지우기: 글씨(어두운 픽셀 + 2px)를 둘레 양피지에서 번져 채움 + 고운 결
       const hole = new Uint8Array(N);
       for (const [x0, y0, x1, y1] of ERASE) {
-        for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (lum(y * w + x) < 196) hole[y * w + x] = 1;
+        for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (lum(y * w + x) < (white || clear ? 224 : 196)) hole[y * w + x] = 1;
       }
       const dh = dist(hole);
-      for (const [x0, y0, x1, y1] of ERASE) for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (dh[y * w + x] <= 2.5) hole[y * w + x] = 1;
+      for (const [x0, y0, x1, y1] of ERASE) for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (dh[y * w + x] <= (white || clear ? 4.5 : 2.5)) hole[y * w + x] = 1;
       const list = [];
       for (let i = 0; i < N; i++) if (hole[i]) list.push(i);
       // 처음 값: 같은 줄에서 가장 가까운 안 지운 픽셀

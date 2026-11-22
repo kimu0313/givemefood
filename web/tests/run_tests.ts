@@ -871,7 +871,7 @@ function testEvents(): void {
   ok(new Set(D.EVENTS.map((e) => e.critic)).size === D.EVENTS.length && D.EVENTS.every((e) => e.critic in D.CRITICS), "미식가 스테이지마다 다른 미식가");
   ok(D.gourmetGrade(1.0) === 5 && D.gourmetGrade(0.9) === 5 && D.gourmetGrade(0.89) === 4 && D.gourmetGrade(0.0) === 1, "만족도 → 별 1~5");
   const e0 = D.EVENTS[0];
-  ok(D.eventReward(e0, 5) === e0.reward && D.eventReward(e0, 0) === 0 && D.eventReward(e0, 1) === 0 && D.eventReward(e0, 2) === 0 && D.eventReward(e0, 3) === (e0.reward * 3) / 5, "보상 = 별 수만큼 (0개 = 없음, 1·2개 = 혹평이라 없음)");
+  ok(D.eventReward(e0, 5) === e0.reward && D.eventReward(e0, 0) === 0 && D.eventReward(e0, 4) === e0.reward * 0.5 && D.eventReward(e0, 3) === 0 && D.eventReward(e0, 2) === -e0.reward * 0.2 && D.eventReward(e0, 1) === -e0.reward * 0.4, "유명세 매출: 별 5 = 전부, 4 = 50%, 3 = 없음, 2·1 = 적자 (−20%·−40%), 0 = 없음");
   ok(D.FAME_RATING[1] < 0 && D.FAME_RATING[2] < 0 && D.FAME_RATING[3] > 0 && D.FAME_HEADLINES[1].includes("휴업") && D.FAME_CROWD[1].includes("문을 닫"), "별 1·2개 = 혹평 (평점이 떨어짐), 별 1개 = 당분간 휴업");
   ok(D.EVENTS.every((e) => D.gourmetReview(e.critic, 5) !== D.gourmetReview("", 5) && ["g_perfect", "g_cooked", "g_burnt", "g_raw", "g_late", "g_wrong"].every((k) => D.reactionLines(k, "gourmet", e.critic).length >= 2 && D.reactionLines(k, "gourmet", e.critic) !== D.reactionLines(k, "gourmet"))), "미식가마다 말투 (요리 한마디 · 한줄평)");
 
@@ -932,12 +932,12 @@ function testEvents(): void {
   }
 }
 
-/** 단골 6명 (가게마다 새 단골 1·2·3명), 재료 (사기·쓰기·품절·외상·저장), 튜토리얼 상태 */
+/** 단골 6명 (가게마다 새 단골 2·1·1·1·1명), 재료 (사기·쓰기·품절·외상·저장), 튜토리얼 상태 */
 function testRegularsAndStock(): void {
   ok(D.REGULARS.length === 6 && D.REGULARS.some((r) => r.id === "cafe"), "단골 6명 (카페 알바생 수아 추가)");
   const counts = D.SHOPS.map((s) => D.regularsNewAt(s.id).length);
-  ok(same(counts, [1, 2, 3, 0, 0]), `가게마다 새 단골 1·2·3명, 4·5번째는 없음 (${counts})`);
-  ok(D.regularsFor("pocha").length === 1 && D.regularsFor("bunsik").length === 3 && D.regularsFor("market").length === 6 && D.regularsFor("suljip").length === 6, "뒤 가게엔 앞에서 만난 단골이 다 옴");
+  ok(same(counts, [2, 1, 1, 1, 1]), `가게마다 새 단골 2·1·1·1·1명 (${counts})`);
+  ok(same(D.SHOPS.map((s) => D.regularsFor(s.id).length), [2, 3, 4, 5, 6]), "뒤 가게엔 앞에서 만난 단골이 다 옴 (2·3·4·5·6명)");
   const pick = (sid: string, n: number): Set<string> => {
     const s = new ShiftSession();
     s.setupStory(D.shopDef(sid).first_level, 2, 1.0, 1.0, 3);
@@ -945,14 +945,15 @@ function testRegularsAndStock(): void {
     for (let i = 0; i < n; i++) seen.add(s.pickRegular()!.id);
     return seen;
   };
-  ok(same([...pick("pocha", 50)], ["taxi"]), "첫 가게 단골은 택시 기사 한 명");
+  ok(same([...pick("pocha", 80)].sort(), ["guard", "taxi"]), "첫 가게 단골은 택시 기사 + 경비 아저씨 두 명");
   const b = pick("bunsik", 300);
-  ok(b.size === 3 && b.has("cafe") && b.has("student") && b.has("taxi"), `두 번째 가게: 택시 기사 + 대학생 + 수아 (${[...b]})`);
-  ok(pick("beach", 600).size === 6, "네 번째 가게엔 여섯 명 모두");
+  ok(b.size === 3 && b.has("cafe") && b.has("guard") && b.has("taxi"), `두 번째 가게: 택시 기사 + 경비 아저씨 + 수아 (${[...b]})`);
+  ok(pick("beach", 600).size === 5 && !pick("beach", 600).has("office"), "네 번째 가게엔 다섯 명 (김 대리는 아직)");
+  ok(pick("suljip", 800).size === 6, "다섯 번째 가게엔 여섯 명 모두");
   // 단골은 하루에 한 번만 (같은 단골이 또 오거나 동시에 둘이 앉지 않음)
   {
     const s2 = new ShiftSession();
-    s2.setupStory(20, 2, 1.0, 1.0, 8);
+    s2.setupStory(D.shopDef("suljip").first_level, 2, 1.0, 1.0, 8); // 마지막 가게 = 단골 6명 모두
     s2.customerTypes = ["regular"];
     const spawn = (s2 as unknown as { spawnCustomer(seat: number): void }).spawnCustomer.bind(s2);
     const got: string[] = [];

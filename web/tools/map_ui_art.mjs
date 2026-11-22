@@ -29,9 +29,9 @@ const PIECES = {
   title: { area: [532, 0, 1142, 112], seed: [840, 50], erase: [["m", 600, 13, 1082, 95]] },
   wallet: { area: [1232, 0, 1686, 98], seed: [1460, 45], erase: [["g", 1262, 16, 1660, 75, 1290, 1630]] },
   plate: { area: [352, 132, 751, 220], seed: [560, 178], erase: [["h", 381, 157, 414, 200], ["g", 437, 157, 738, 201, 432, 742]] },
-  btn_green: { area: [751, 132, 978, 216], seed: [866, 178], erase: [["h", 821, 157, 951, 197]] },
+  btn_green: { area: [751, 132, 978, 212], seed: [866, 178], erase: [["h", 821, 157, 951, 197]] },
   btn_red: { area: [978, 132, 1182, 216], seed: [1075, 178], erase: [["h", 1047, 157, 1142, 198]] },
-  btn_green_blank: { area: [751, 132, 978, 216], seed: [866, 178], erase: [["h", 768, 157, 951, 199]] },
+  btn_green_blank: { area: [751, 132, 978, 212], seed: [866, 178], erase: [["h", 768, 157, 951, 199]] },
 };
 
 const browser = await chromium.launch({ executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true });

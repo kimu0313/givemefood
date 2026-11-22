@@ -98,3 +98,31 @@ export function regularPortrait(regularId: string, size: number, met: boolean): 
 export function gourmetPortrait(shopId: string, size: number, met = true): CanvasWidget {
   return regularPortrait(`gourmet:${D.eventFor(shopId)?.critic ?? ""}`, size, met);
 }
+
+/** 단골 도감 카드용 상반신 그림 (2026-11-22 도감을 가로로 넘기는 카드로 바꿀 때): 액자 없이 사람만, 머리는 위쪽 40%.
+ *  못 만난 단골은 검은 그림자 + 큰 "?" */
+export function regularBust(regularId: string, w: number, h: number, met: boolean): CanvasWidget {
+  return new CanvasWidget(w, h, (g) => {
+    const ctx = g.ctx;
+    const off = document.createElement("canvas");
+    off.width = ctx.canvas.width;
+    off.height = ctx.canvas.height;
+    const octx = off.getContext("2d")!;
+    octx.setTransform(ctx.getTransform());
+    const k = w / 300.0;
+    octx.translate(w * 0.5, h * 0.4);
+    octx.scale(k, k);
+    drawPerson(new Gfx(octx), regularId, met ? "happy" : "normal");
+    if (!met) {
+      octx.setTransform(1, 0, 0, 1, 0, 0);
+      octx.globalCompositeOperation = "source-atop";
+      octx.fillStyle = "#3e3028";
+      octx.fillRect(0, 0, off.width, off.height);
+    }
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(off, 0, 0);
+    ctx.restore();
+    if (!met) FoodArt.textOutlined(g, "?", v(w * 0.5, h * 0.42), Math.round(h * 0.34), rgb(1, 0.97, 0.9), rgb(0.23, 0.14, 0.08), 10, w, DISPLAY);
+  });
+}

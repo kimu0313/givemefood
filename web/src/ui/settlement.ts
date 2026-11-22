@@ -357,10 +357,26 @@ export class SettlementScene extends Scene {
         sign.appendChild(Ui.label("— 사장 올림 —", 28, Ui.MUTED, "center"));
         col.appendChild(sign);
       }
-      col.appendChild(Ui.heading("유명세 매출 없음", 56, Ui.MUTED, null));
+      // 적자 (손님이 끊긴 동안 재료·가겟세는 그대로 나감)
+      const loss = Ui.hbox(14);
+      loss.style.justifyContent = "center";
+      loss.style.alignItems = "center";
+      loss.append(Ui.icon(Ui.ICON.coin, 76), Ui.heading(`적자 −${D.formatWon(-gr.reward)}`, 76, Ui.BAD, rgb(0.25, 0.05, 0.03)));
+      col.appendChild(loss);
+      col.appendChild(Ui.label(closed ? "문을 닫은 동안에도 가겟세와 상한 재료값은 나갔어요…" : "손님이 줄어도 가겟세와 재료값은 그대로 나갔어요…", 27, Ui.MUTED, "center", true));
       col.appendChild(Ui.heading(`가게 평점 ★${before.toFixed(1)} → ★${after.toFixed(1)}`, 40, Ui.BAD, null));
       col.appendChild(Ui.label(closed ? "가게 문을 잠시 닫고 마음을 다잡았어요. 다음엔 꼭 좋은 평가를 받아요!" : "평점이 떨어지면 손님이 덜 기다려 줘요. 다음엔 실력으로 보여 줘요!", 27, Ui.MUTED, "center", true));
       nextBtn("다시 힘내요", () => this.finish(false, "map"));
+      return;
+    }
+    if (gr.reward <= 0) {
+      // 별 3개: 평범한 평가 — 유명세 매출은 없고 평점만 조금 (2026-11-21 사용자 "별 3개에는 없음")
+      p.prepend(Ui.ribbon("조금 알려졌어요", Ui.EVENT, 44));
+      caption(`${shop.name}의 이름이 조금 알려졌어요`);
+      col.appendChild(Ui.heading("유명세 매출 없음", 60, Ui.MUTED, null));
+      col.appendChild(Ui.heading(`가게 평점 ★${before.toFixed(1)} → ★${after.toFixed(1)}`, 40, Ui.GOOD, null));
+      col.appendChild(Ui.label("별 4개 이상을 받아야 손님이 몰려와 매출이 올라요. 다음엔 더 완벽하게!", 27, Ui.MUTED, "center", true));
+      nextBtn("좋아요!", () => this.finish(false, "map"));
       return;
     }
     // 매출이 오름 + 가게 평점이 오름

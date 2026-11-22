@@ -178,11 +178,15 @@ const shots = {
     await shot("map_popup");
   },
   async collection() {
-    await open("map", "Object.assign(window.__state, {level: 16}); window.__state.regulars = {taxi: 3, student: 1, cafe: 2, office: 1, grandma: 2, guard: 1}; window.__game.goto('map')");
+    await open("map", "Object.assign(window.__state, {level: 16}); window.__state.regulars = {taxi: 3, student: 1, cafe: 2, office: 1, grandma: 2}; window.__state.events = {pocha: 4}; window.__game.goto('map')");
     await shot("map_book_button");
     await page.getByText("단골 도감").click();
     await page.waitForTimeout(400);
     await shot("collection");
+    // 2026-11-22 가로로 넘기는 카드: 다음 쪽 (단골 5·6 + 가게 기록)
+    await page.getByRole("button", { name: "다음" }).click();
+    await page.waitForTimeout(600);
+    await shot("collection_2");
   },
   async login() {
     await open("title", "Object.assign(window.__state, {level: 5, wallet: 42000}); window.__game.goto('title')");

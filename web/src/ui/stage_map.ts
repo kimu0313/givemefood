@@ -19,7 +19,7 @@ import { MapArt } from "../art/map_art.ts";
 import * as G from "../art/map_geo.ts";
 import { LevelNode, MapButton, MapNote, ShopPlate, SideArrow } from "./map_widgets.ts";
 import { starRow } from "./star_row.ts";
-import { openCollection } from "./collection.ts";
+import { collectionKey, openCollection } from "./collection.ts";
 import { Tutorial, elementRect, type TutStep } from "./tutorial.ts";
 import { gourmetPortrait } from "./portrait.ts";
 import { menuIcons, menuPic } from "../shift/shift_hud.ts";
@@ -550,6 +550,10 @@ export class StageMap extends Scene {
   }
 
   onKey(key: string): void {
+    if (this.popup !== null) {
+      collectionKey(this.popup, key); // 단골 도감이 열려 있으면 ←→ 로 카드를 넘김 (다른 창은 무시)
+      return;
+    }
     if (key === "ArrowLeft") this.flip(-1);
     else if (key === "ArrowRight") this.flip(1);
   }
@@ -892,7 +896,8 @@ export class StageMap extends Scene {
       const grade = GameState.eventGrade(sid);
       col.appendChild(starRow(grade, 420, 80, 36).el);
       col.appendChild(Ui.label(`"${D.gourmetReview(e.critic, grade)}"`, 30, Ui.INK, "center", true));
-      col.appendChild(Ui.label(grade <= D.BAD_GRADE ? `${shop.name}에 이미 다녀갔어요 · 혹평을 받았어요` : `${shop.name}에 이미 다녀갔어요 · 유명세 매출 +${D.formatWon(D.eventReward(e, grade))}`, 27, Ui.MUTED, "center", true));
+      const fame = D.eventReward(e, grade);
+      col.appendChild(Ui.label(fame < 0 ? `${shop.name}에 이미 다녀갔어요 · 혹평으로 적자 −${D.formatWon(-fame)}` : fame === 0 ? `${shop.name}에 이미 다녀갔어요 · 유명세 매출 없음` : `${shop.name}에 이미 다녀갔어요 · 유명세 매출 +${D.formatWon(fame)}`, 27, Ui.MUTED, "center", true));
       const ok = Ui.button("확인", Ui.SECONDARY, 38, 110);
       Ui.onPress(ok, () => this.closePopup());
       col.appendChild(ok);
@@ -914,7 +919,7 @@ export class StageMap extends Scene {
     box.style.gap = "6px";
     box.appendChild(Ui.row("주문", `${e.perRound}가지씩 코스 ${e.rounds}번`, 30));
     box.appendChild(Ui.row("평가", "완벽한 요리만 높은 점수", 30));
-    box.appendChild(Ui.row("유명세", `신문에 실리면 매출 최대 +${D.formatWon(e.reward)}`, 30, Ui.INK, Ui.EVENT));
+    box.appendChild(Ui.row("유명세", `별 4개 이상이면 매출 최대 +${D.formatWon(e.reward)} · 혹평이면 적자`, 30, Ui.INK, Ui.EVENT));
     col.appendChild(box);
     col.appendChild(Ui.tag("딱 한 번만 도전할 수 있어요!", Ui.BAD, 28));
     const row = Ui.hbox(20);

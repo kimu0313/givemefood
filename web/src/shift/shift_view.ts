@@ -340,7 +340,7 @@ export class ShiftView extends Scene {
       const e = s.eventDef ?? D.EVENTS[0];
       entries.push({ head: D.criticName(e.critic), body: `한 번에 ${e.perRound}가지씩, 코스 ${e.rounds}번 주문해요. 코스가 지날수록 더 못 기다려요.` });
       entries.push({ head: "평가", body: "완벽 3점 · 익음 1점 · 탐·덜 익음·늦음 0점\n만족도에 따라 별 1~5개" });
-      entries.push({ head: "유명세", body: `좋은 평가를 받으면 신문에 실려 가게가 유명해져요!\n손님이 몰려 매출이 최대 +${D.formatWon(e.reward)}, 가게 평점도 올라요` });
+      entries.push({ head: "유명세", body: `별 4개 이상이면 가게가 유명해져 매출이 최대 +${D.formatWon(e.reward)}, 평점도 올라요\n별 1·2개는 혹평이라 적자가 나고 평점이 떨어져요` });
       entries.push({ head: "딱 한 번!", body: "영업을 시작하면 다시 도전할 수 없어요.\n중간에 나가면 리뷰도 없어요." });
       this.hud.showIntro(`미식가 방문 · ${shopName}`, "까다로운 미식가가 찾아왔어요!", entries, "도전 시작!", Ui.EVENT, "나중에");
       return;
